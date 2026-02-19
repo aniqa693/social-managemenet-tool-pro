@@ -74,8 +74,8 @@ const creatorNavItems = [
     icon: Palette,
     subItems: [
       { title: "Post Generator", href: "/dashboard/creator/visaul/post" },
-      { title: "Thumbnail Generator", href: "/dashboard/creator/visual/thumbnails" },
-      { title: "Post Enhancer", href: "/dashboard/creator/visual/enhancer" },
+      { title: "Thumbnail Generator", href: "/dashboard/creator/visaul/thumbnails" },
+      { title: "Post Enhancer", href: "/dashboard/creator/visaul/enhancer" },
     ],
   },
   {

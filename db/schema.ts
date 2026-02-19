@@ -1,5 +1,5 @@
 import { relations } from "drizzle-orm";
-import { pgTable, text, timestamp, boolean, index, integer, varchar, json } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, boolean, index, integer, varchar, json, jsonb } from "drizzle-orm/pg-core";
 
 export const user = pgTable("user", {
   id: text("id").primaryKey(),
@@ -136,3 +136,67 @@ export const thumbnailsTable = pgTable('thumbnails', {
   userId: text('userId'),
   createdOn: text('createdOn').notNull(),
 });
+// db/schema.ts (add this new table)
+
+export const socialPostsTable = pgTable('social_posts', {
+  id: integer().primaryKey().generatedAlwaysAsIdentity(),
+  userInput: text('userInput').notNull(),
+  postUrl: text('postUrl').notNull(),
+  includeImage: text('includeImage'),
+  platform: text('platform').notNull(), // 'instagram' or 'facebook'
+  aspectRatio: text('aspectRatio').notNull(), // '1:1', '4:5', '16:9', etc.
+  userEmail: text('userEmail').notNull(),
+  userId: text('userId'),
+  createdOn: text('createdOn').notNull(),
+});
+
+// You can also add an enum for better type safety
+export const platformEnum = ['instagram', 'facebook'] as const;
+export const aspectRatios = {
+  instagram: ['1:1', '4:5', '16:9', '9:16'],
+  facebook: ['1:1', '16:9', '9:16', '4:5']
+} as const;
+// db/schema.ts (add this new table)
+
+// db/schema.ts - Update enhancedPostsTable
+export const enhancedPostsTable = pgTable('enhanced_posts', {
+  id: integer().primaryKey().generatedAlwaysAsIdentity(),
+  originalImageUrl: text('originalImageUrl').notNull(),
+  enhancedImageUrl: text('enhancedImageUrl').notNull(),
+  platform: text('platform').notNull(),
+  enhancementType: text('enhancementType').notNull(),
+  enhancementSettings: jsonb('enhancementSettings'),
+  userInput: text('userInput'),
+  userEmail: text('userEmail').notNull(),
+  userId: text('userId'),
+  createdOn: text('createdOn').notNull(),
+});
+
+// Enhancement types enum
+export const enhancementTypes = [
+  'basic',           // Basic adjustments (brightness, contrast, saturation)
+  'crop',            // Crop and resize
+  'rotate',          // Rotate and flip
+  'filters',         // Instagram-like filters
+  'overlay',         // Text and stickers overlay
+  'borders',         // Borders and frames
+  'optimize'         // Auto optimize for social platforms
+] as const;
+
+export const platformPresets = {
+  instagram: {
+    name: 'Instagram',
+    size: { width: 1080, height: 1080 },
+    aspectRatios: ['1:1', '4:5', '16:9', '9:16']
+  },
+  facebook: {
+    name: 'Facebook',
+    size: { width: 1200, height: 630 },
+    aspectRatios: ['1.91:1', '1:1', '4:5', '16:9']
+  },
+  twitter: {
+    name: 'Twitter',
+    size: { width: 1024, height: 512 },
+    aspectRatios: ['2:1', '1:1', '16:9']
+  }
+} as const;

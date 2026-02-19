@@ -1,0 +1,849 @@
+'use client';
+
+import { useState, useEffect } from 'react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { 
+  Loader2, Sparkles, Copy, Twitter, Instagram, 
+  Facebook, Hash, Linkedin, Zap, TrendingUp, Palette, 
+  Volume2, Check, Share2, Download, Star, Clock, 
+  MessageSquare, Heart, Target, Wand2,
+  ArrowDown, Clipboard, Grid, List, Eye, Filter, Database, Save, User,
+  LogOut
+} from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
+import { Slider } from '@/components/ui/slider';
+import { motion, AnimatePresence } from 'framer-motion';
+import toast, { Toaster } from 'react-hot-toast';
+import { useSession } from '../../../../../lib/auth-client';// Import from your auth client
+import { signOut } from 'better-auth/api';
+
+type CaptionType = {
+  caption: string;
+  hashtags: string[];
+  emojis: string[];
+  engagementScore?: number;
+  tone?: string;
+  characterCount?: number;
+};
+
+type NicheSuggestion = {
+  value: string;
+  category: string;
+  icon: React.ReactNode;
+};
+
+export default function Home() {
+  // State
+  const [niche, setNiche] = useState('');
+  const [captions, setCaptions] = useState<CaptionType[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [tone, setTone] = useState('friendly');
+  const [platform, setPlatform] = useState('instagram');
+  const [copiedStates, setCopiedStates] = useState<boolean[]>([]);
+  const [likedCaptions, setLikedCaptions] = useState<number[]>([]);
+  const [selectedCaption, setSelectedCaption] = useState<number | null>(null);
+  const [includeTrending, setIncludeTrending] = useState(true);
+  const [creativityLevel, setCreativityLevel] = useState([7]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [generationTime, setGenerationTime] = useState<number>(0);
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [saving, setSaving] = useState(false);
+  const [savingIndex, setSavingIndex] = useState<number | null>(null);
+  const [saveStatus, setSaveStatus] = useState<{saved: boolean; recordId?: number}>({saved: false});
+
+  // Get session from Better Auth
+  const { data: session, isPending: sessionLoading } = useSession();
+  const isLoggedIn = !!session?.user;
+  const userEmail = session?.user?.email || 'guest@example.com';
+  const userName = session?.user?.name || '';
+  const userId = session?.user?.id;
+
+  // Data
+  const nicheSuggestions: NicheSuggestion[] = [
+    { value: 'Fitness & Health', category: 'Lifestyle', icon: <Zap className="h-4 w-4" /> },
+    { value: 'Travel Photography', category: 'Creative', icon: <Eye className="h-4 w-4" /> },
+    { value: 'Vegan Recipes', category: 'Food', icon: <Palette className="h-4 w-4" /> },
+    { value: 'Tech Gadgets', category: 'Technology', icon: <Zap className="h-4 w-4" /> },
+    { value: 'Personal Finance', category: 'Business', icon: <TrendingUp className="h-4 w-4" /> },
+    { value: 'Digital Marketing', category: 'Business', icon: <MessageSquare className="h-4 w-4" /> },
+  ];
+
+  const tones = [
+    { value: 'friendly', label: 'Friendly', icon: <Heart className="h-4 w-4" />, color: 'text-green-500' },
+    { value: 'professional', label: 'Professional', icon: <Linkedin className="h-4 w-4" />, color: 'text-blue-500' },
+    { value: 'funny', label: 'Funny', icon: <MessageSquare className="h-4 w-4" />, color: 'text-yellow-500' },
+    { value: 'inspirational', label: 'Inspirational', icon: <Sparkles className="h-4 w-4" />, color: 'text-purple-500' },
+    { value: 'casual', label: 'Casual', icon: <Heart className="h-4 w-4" />, color: 'text-pink-500' },
+    { value: 'bold', label: 'Bold', icon: <Volume2 className="h-4 w-4" />, color: 'text-red-500' },
+  ];
+
+  const platforms = [
+    { value: 'instagram', label: 'Instagram', icon: Instagram, color: 'bg-gradient-to-r from-purple-500 to-pink-500' },
+    { value: 'twitter', label: 'Twitter', icon: Twitter, color: 'bg-gradient-to-r from-blue-400 to-blue-600' },
+    { value: 'facebook', label: 'Facebook', icon: Facebook, color: 'bg-gradient-to-r from-blue-600 to-blue-800' },
+    { value: 'linkedin', label: 'LinkedIn', icon: Linkedin, color: 'bg-gradient-to-r from-blue-700 to-blue-900' },
+    { value: 'tiktok', label: 'TikTok', icon: MessageSquare, color: 'bg-gradient-to-r from-black to-gray-800' },
+  ];
+
+  // Effects
+  useEffect(() => {
+    setShowSuggestions(niche.length > 0);
+    
+    // Log session info for debugging
+    if (session) {
+      console.log('✅ User authenticated via Better Auth:', { 
+        email: session.user.email, 
+        name: session.user.name,
+        id: session.user.id
+      });
+    }
+  }, [niche, session]);
+
+  // Functions
+  const copyToClipboard = async (text: string, index: number) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      const newCopiedStates = [...copiedStates];
+      newCopiedStates[index] = true;
+      setCopiedStates(newCopiedStates);
+      toast.success('Copied to clipboard! 📋');
+      setTimeout(() => {
+        const resetStates = [...newCopiedStates];
+        resetStates[index] = false;
+        setCopiedStates(resetStates);
+      }, 2000);
+    } catch (err) {
+      toast.error('Failed to copy 😢');
+    }
+  };
+
+  const copyAllCaptions = () => {
+    const allText = captions.map((cap, idx) => 
+      `Option ${idx + 1}:\n${cap.caption}\nHashtags: ${cap.hashtags.join(' ')}\nEmojis: ${cap.emojis.join(' ')}\n\n`
+    ).join('---\n');
+    copyToClipboard(allText, -1);
+    toast.success('All captions copied! 🎉');
+  };
+
+  const toggleLike = (index: number) => {
+    if (likedCaptions.includes(index)) {
+      setLikedCaptions(likedCaptions.filter(i => i !== index));
+      toast('Removed from favorites', { icon: '💔' });
+    } else {
+      setLikedCaptions([...likedCaptions, index]);
+      toast.success('Added to favorites! ⭐', { icon: '⭐' });
+    }
+  };
+
+  const generateCaptions = async () => {
+    if (!niche.trim()) {
+      toast.error('Please enter a niche');
+      return;
+    }
+
+    const startTime = Date.now();
+    setLoading(true);
+    setError('');
+    setCaptions([]);
+    setSelectedCaption(null);
+    setSaveStatus({saved: false});
+
+    const loadingToast = toast.loading('Generating creative captions... ✨');
+
+    try {
+      console.log('Sending request with user:', { 
+        email: userEmail, 
+        isLoggedIn, 
+        name: userName,
+        userId
+      });
+      
+      const response = await fetch('/api/generate-caption', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          niche, 
+          tone, 
+          platform,
+          includeTrending,
+          creativityLevel: creativityLevel[0],
+          userEmail: userEmail, // This will be used if cookies don't work
+          userId: userId
+        }),
+      });
+
+      const data = await response.json();
+      const endTime = Date.now();
+      setGenerationTime(endTime - startTime);
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to generate captions');
+      }
+
+      console.log('API Response:', {
+        captionsCount: data.captions?.length,
+        saveInfo: data.saveInfo,
+        metadata: data.metadata
+      });
+
+      // Add engagement scores to generated captions
+      const captionsWithScores = (data.captions || []).map((caption: CaptionType, index: number) => ({
+        ...caption,
+        engagementScore: Math.floor(Math.random() * 30) + 70,
+        characterCount: caption.caption.length,
+        tone,
+      }));
+
+      setCaptions(captionsWithScores);
+      setCopiedStates(new Array(captionsWithScores.length).fill(false));
+      
+      // Update save status
+      if (data.saveInfo?.saved) {
+        setSaveStatus({ saved: true, recordId: data.saveInfo.recordId });
+        toast.dismiss(loadingToast);
+        toast.success(
+          <div className="flex items-center gap-2">
+            <Database className="h-5 w-5 text-green-500" />
+            <span>
+              Generated and saved {captionsWithScores.length} captions for {data.saveInfo.userEmail}! 🎉
+            </span>
+          </div>,
+          { duration: 4000 }
+        );
+      } else {
+        setSaveStatus({ saved: false });
+        toast.dismiss(loadingToast);
+        toast.success(
+          <div className="flex items-center gap-2">
+            <Sparkles className="h-5 w-5 text-yellow-500" />
+            <span>
+              Generated {captionsWithScores.length} captions in {(endTime - startTime)/1000}s! 
+              {!isLoggedIn && ' (Login to save)'}
+            </span>
+          </div>,
+          { duration: 4000 }
+        );
+      }
+
+    } catch (err) {
+      toast.dismiss(loadingToast);
+      const errorMessage = err instanceof Error ? err.message : 'Something went wrong';
+      setError(errorMessage);
+      toast.error(
+        <div className="flex items-center gap-2">
+          <span className="text-red-500">⚠️</span>
+          <span>{errorMessage}</span>
+        </div>
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const useSuggestion = (suggestion: string) => {
+    setNiche(suggestion);
+    setShowSuggestions(false);
+    toast.success(`Using: ${suggestion}`, { icon: '🎯' });
+  };
+
+  const downloadCaptions = () => {
+    const content = captions.map((cap, idx) => 
+      `=== Option ${idx + 1} ===\n\nCaption: ${cap.caption}\n\nHashtags: ${cap.hashtags.join(' ')}\n\nEmojis: ${cap.emojis.join(' ')}\n\nEngagement Score: ${cap.engagementScore}%\n\n`
+    ).join('\n---\n\n');
+    
+    const blob = new Blob([content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `captions_${niche.replace(/\s+/g, '_')}_${Date.now()}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    
+    toast.success('Captions downloaded! 💾');
+  };
+
+  const shareCaption = (index: number) => {
+    if (navigator.share) {
+      const caption = captions[index];
+      navigator.share({
+        title: `Caption for ${niche}`,
+        text: `${caption.caption}\n\n${caption.hashtags.join(' ')}`,
+      });
+    } else {
+      copyToClipboard(captions[index].caption, index);
+    }
+  };
+
+  const getPlatformIcon = (platform: string) => {
+    return platforms.find(p => p.value === platform)?.icon || Hash;
+  };
+
+  // Save individual caption
+  const saveIndividualCaption = async (caption: CaptionType, index: number) => {
+    if (!isLoggedIn) {
+      toast.error('Please login to save captions');
+      return;
+    }
+
+    setSavingIndex(index);
+    const saveToast = toast.loading(`Saving caption ${index + 1}...`);
+
+    try {
+      const response = await fetch('/api/generate-caption', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'save-single',
+          niche: niche,
+          captionContent: caption,
+          platform: platform,
+          tone: tone,
+          includeTrending: includeTrending,
+          creativityLevel: creativityLevel[0],
+          userEmail: userEmail,
+          userId: userId
+        }),
+      });
+
+      const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to save caption');
+      }
+      
+      toast.dismiss(saveToast);
+      toast.success(
+        <div className="flex items-center gap-2">
+          <Database className="h-4 w-4 text-green-500" />
+          <span>Caption saved to your account! 💾</span>
+        </div>,
+        { duration: 2000 }
+      );
+
+    } catch (error: any) {
+      toast.dismiss(saveToast);
+      toast.error(error.message || 'Failed to save caption');
+    } finally {
+      setSavingIndex(null);
+      setSaving(false);
+    }
+  };
+
+  // Handle logout with Better Auth
+  const handleLogout = async () => {
+    try {
+      await signOut();
+      toast.success('Logged out successfully!');
+    } catch (error) {
+      toast.error('Failed to logout');
+    }
+  };
+
+  if (sessionLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-purple-600" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-linear-to-br from-purple-50 via-blue-50 to-pink-50 p-4 md:p-8">
+      <Toaster position="top-right" />
+      
+      <div className="max-w-6xl mx-auto">
+        {/* Header */}
+        <header className="text-center mb-8">
+          <div className="inline-flex items-center gap-3 bg-linear-to-r from-purple-600 to-pink-600 text-white px-6 py-3 rounded-full mb-6">
+            <Wand2 className="h-6 w-6" />
+            <span className="font-semibold">AI Caption Generator</span>
+          </div>
+          <h1 className="text-4xl md:text-5xl font-bold text-gray-900 mb-3">
+            <span className="bg-clip-text text-transparent bg-linear-to-r from-purple-600 via-pink-600 to-purple-600">
+              Create Captivating Captions
+            </span>
+          </h1>
+          <p className="text-lg text-gray-600 max-w-2xl mx-auto">
+            Enter any niche and generate beautiful, engaging social media captions instantly
+           
+            {isLoggedIn && (
+              <span className="block mt-2 text-sm text-green-600">
+                ✓ Logged in as {userEmail} • Your captions will be saved automatically
+              </span>
+            )}
+          </p>
+        </header>
+
+        {/* Input Section */}
+        <div className="mb-8">
+          <Card className="shadow-lg border border-purple-200">
+            <CardHeader>
+              <CardTitle className="text-xl text-purple-700 flex items-center gap-2">
+                <Clipboard className="h-5 w-5" />
+                Generate Your Captions
+              </CardTitle>
+              <CardDescription>
+                Fill in the details below and click generate to create amazing captions
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="space-y-3">
+                <Label className="text-gray-700 flex items-center gap-2">
+                  <Target className="h-5 w-5 text-purple-500" />
+                  What's Your Niche?
+                </Label>
+                <div className="relative">
+                  <Input
+                    placeholder="Enter your niche (e.g., Fitness, Travel, Food, Tech...)"
+                    value={niche}
+                    onChange={(e) => setNiche(e.target.value)}
+                    className="h-14 text-lg border-2 border-purple-300 focus:border-purple-500 pl-12"
+                  />
+                  <Sparkles className="absolute left-4 top-4 h-6 w-6 text-purple-400" />
+                </div>
+                
+                {showSuggestions && (
+                  <div className="space-y-2">
+                    <Label className="text-sm text-gray-500 flex items-center gap-2">
+                      <Filter className="h-3 w-3" />
+                      Quick Suggestions:
+                    </Label>
+                    <div className="flex flex-wrap gap-2">
+                      {nicheSuggestions.map((suggestion, idx) => (
+                        <Badge
+                          key={idx}
+                          variant="outline"
+                          className="cursor-pointer hover:bg-purple-50 hover:text-purple-700 hover:border-purple-300 text-sm px-3 py-1"
+                          onClick={() => useSuggestion(suggestion.value)}
+                        >
+                          {suggestion.icon}
+                          <span className="ml-1">{suggestion.value}</span>
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="space-y-3">
+                  <Label className="text-gray-700 flex items-center gap-2">
+                    <Share2 className="h-4 w-4 text-blue-500" />
+                    Platform
+                  </Label>
+                  <Select value={platform} onValueChange={setPlatform}>
+                    <SelectTrigger className="border-2 border-purple-300 h-12">
+                      <SelectValue placeholder="Select platform" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {platforms.map((platformOption) => (
+                        <SelectItem key={platformOption.value} value={platformOption.value}>
+                          {platformOption.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-3">
+                  <Label className="text-gray-700 flex items-center gap-2">
+                    <Volume2 className="h-4 w-4 text-pink-500" />
+                    Tone of Voice
+                  </Label>
+                  <Select value={tone} onValueChange={setTone}>
+                    <SelectTrigger className="border-2 border-purple-300 h-12">
+                      <SelectValue placeholder="Select tone" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {tones.map((toneOption) => (
+                        <SelectItem key={toneOption.value} value={toneOption.value}>
+                          <div className="flex items-center gap-2">
+                            {toneOption.icon}
+                            {toneOption.label}
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-3">
+                  <Label className="text-gray-700 flex items-center gap-2 justify-between">
+                    <span className="flex items-center gap-2">
+                      <Palette className="h-4 w-4 text-yellow-500" />
+                      Creativity Level
+                    </span>
+                    <span className="text-sm font-medium text-purple-600">
+                      {creativityLevel[0]}/10
+                    </span>
+                  </Label>
+                  <Slider
+                    value={creativityLevel}
+                    onValueChange={setCreativityLevel}
+                    max={10}
+                    min={1}
+                    step={1}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4 border-t border-purple-100">
+                <div className="flex items-center justify-between">
+                  <Label className="text-gray-700 flex items-center gap-2">
+                    <TrendingUp className="h-4 w-4 text-green-500" />
+                    Include Trending Hashtags
+                  </Label>
+                  <Switch checked={includeTrending} onCheckedChange={setIncludeTrending} />
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <Label className="text-gray-700 flex items-center gap-2">
+                    <Grid className="h-4 w-4 text-purple-500" />
+                    View Mode
+                  </Label>
+                  <div className="flex border border-purple-200 rounded-lg overflow-hidden">
+                    <Button
+                      variant={viewMode === 'grid' ? 'default' : 'ghost'}
+                      size="sm"
+                      onClick={() => setViewMode('grid')}
+                      className="rounded-none"
+                    >
+                      <Grid className="h-4 w-4 mr-2" />
+                      Grid
+                    </Button>
+                    <Button
+                      variant={viewMode === 'list' ? 'default' : 'ghost'}
+                      size="sm"
+                      onClick={() => setViewMode('list')}
+                      className="rounded-none"
+                    >
+                      <List className="h-4 w-4 mr-2" />
+                      List
+                    </Button>
+                  </div>
+                </div>
+              </div>
+
+              {error && (
+                <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
+                  <p className="text-red-600 text-sm">{error}</p>
+                </div>
+              )}
+
+              <Button
+                onClick={generateCaptions}
+                disabled={loading || !niche.trim()}
+                className="w-full h-14 text-lg bg-linear-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700"
+              >
+                {loading ? (
+                  <>
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                    Generating Captions...
+                  </>
+                ) : (
+                  <>
+                    <Wand2 className="h-5 w-5" />
+                    Generate Captions Now
+                  </>
+                )}
+              </Button>
+            </CardContent>
+          </Card>
+
+          {/* Quick Stats */}
+          {captions.length > 0 && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mt-4 grid grid-cols-4 gap-4"
+            >
+              <Card className="text-center p-4 bg-linear-to-br from-purple-50 to-purple-100 border border-purple-200">
+                <div className="text-2xl font-bold text-purple-700">{captions.length}</div>
+                <div className="text-sm text-gray-600">Captions</div>
+              </Card>
+              <Card className="text-center p-4 bg-linear-to-br from-pink-50 to-pink-100 border border-pink-200">
+                <div className="text-2xl font-bold text-pink-700">{likedCaptions.length}</div>
+                <div className="text-sm text-gray-600">Favorites</div>
+              </Card>
+              <Card className="text-center p-4 bg-linear-to-br from-blue-50 to-blue-100 border border-blue-200">
+                <div className="text-2xl font-bold text-blue-700">{(generationTime / 1000).toFixed(1)}s</div>
+                <div className="text-sm text-gray-600">Generation Time</div>
+              </Card>
+            </motion.div>
+          )}
+        </div>
+
+        {/* Output Section */}
+        <div className="mb-8">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+            <div>
+              <h2 className="text-2xl font-bold text-gray-900 flex items-center gap-3">
+                <Clipboard className="h-6 w-6 text-purple-600" />
+                Generated Captions
+                {captions.length > 0 && (
+                  <Badge className="bg-purple-100 text-purple-800">
+                    {captions.length} results
+                  </Badge>
+                )}
+              </h2>
+              {captions.length > 0 && (
+                <p className="text-gray-600 mt-1">
+                  For: <span className="font-semibold text-purple-700">{niche}</span> • 
+                  Platform: <span className="font-semibold text-blue-600">{platforms.find(p => p.value === platform)?.label}</span> • 
+                  Tone: <span className="font-semibold text-pink-600">{tones.find(t => t.value === tone)?.label}</span>
+                  {saveStatus.saved && (
+                    <span className="ml-3 text-green-600 font-medium">
+                      <Database className="h-4 w-4 inline mr-1" />
+                      Saved to {userEmail}
+                    </span>
+                  )}
+                </p>
+              )}
+            </div>
+
+            {captions.length > 0 && (
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={copyAllCaptions}>
+                  <Copy className="mr-2 h-4 w-4" />
+                  Copy All
+                </Button>
+                <Button variant="outline" onClick={downloadCaptions}>
+                  <Download className="mr-2 h-4 w-4" />
+                  Download
+                </Button>
+              </div>
+            )}
+          </div>
+
+          <AnimatePresence>
+            {captions.length > 0 ? (
+              <div className={viewMode === 'grid' ? "grid grid-cols-1 md:grid-cols-2 gap-6" : "space-y-6"}>
+                {captions.map((caption, index) => {
+                  const PlatformIcon = getPlatformIcon(platform);
+                  const fullText = `${caption.caption}\n\n${caption.hashtags.join(' ')}\n\n${caption.emojis.join(' ')}`;
+                  
+                  return (
+                    <motion.div
+                      key={index}
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: index * 0.1 }}
+                    >
+                      <Card className="border border-purple-200 hover:border-purple-300 transition-all">
+                        <CardHeader>
+                          <div className="flex justify-between items-start">
+                            <div className="flex items-center gap-3">
+                              <div className="p-2 rounded-lg bg-linear-to-r from-purple-500 to-pink-500">
+                                <PlatformIcon className="h-5 w-5 text-white" />
+                              </div>
+                              <div>
+                                <CardTitle className="text-lg flex items-center gap-2">
+                                  Option {index + 1}
+                                  {likedCaptions.includes(index) && (
+                                    <Star className="h-4 w-4 text-yellow-500 fill-yellow-500" />
+                                  )}
+                                </CardTitle>
+                                <div className="flex items-center gap-2 mt-1">
+                                  <Badge variant="outline" className="text-xs capitalize">
+                                    {caption.tone}
+                                  </Badge>
+                                  <Badge variant="outline" className="text-xs">
+                                    {caption.characterCount} chars
+                                  </Badge>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="flex gap-1">
+                              <Button variant="ghost" size="icon" onClick={() => toggleLike(index)}>
+                                <Star className={`h-4 w-4 ${likedCaptions.includes(index) ? 'text-yellow-500 hover:text-yellow-600' : 'text-gray-400 hover:text-yellow-500'}`} />
+                              </Button>
+                              <Button 
+                                variant="ghost" 
+                                size="icon" 
+                                onClick={() => saveIndividualCaption(caption, index)}
+                                disabled={saving && savingIndex === index}
+                                title={isLoggedIn ? "Save to your account" : "Login to save"}
+                              >
+                                {saving && savingIndex === index ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  <Save className={`h-4 w-4 ${isLoggedIn ? 'text-gray-600 hover:text-green-600' : 'text-gray-400'}`} />
+                                )}
+                              </Button>
+                              <Button variant="ghost" size="icon" onClick={() => copyToClipboard(fullText, index)}>
+                                {copiedStates[index] ? <Check className="h-4 w-4 text-green-600" /> : <Copy className="h-4 w-4" />}
+                              </Button>
+                            </div>
+                          </div>
+                        </CardHeader>
+                        
+                        <CardContent className="space-y-6">
+                          <div className="space-y-2">
+                            <Label className="text-sm text-gray-500 flex items-center gap-2">
+                              <MessageSquare className="h-4 w-4 text-purple-500" />
+                              Caption
+                            </Label>
+                            <div className="bg-purple-50 p-4 rounded-xl border border-purple-100">
+                              <p className="text-gray-800 text-lg leading-relaxed font-medium">
+                                {caption.caption}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div className="space-y-2">
+                              <Label className="text-sm text-gray-500 flex items-center gap-2">
+                                <Hash className="h-4 w-4" />
+                                Hashtags ({caption.hashtags.length})
+                              </Label>
+                              <div className="flex flex-wrap gap-2">
+                                {caption.hashtags.map((tag, tagIndex) => (
+                                  <Badge key={tagIndex} variant="secondary" className="cursor-pointer hover:bg-blue-100">
+                                    {tag}
+                                  </Badge>
+                                ))}
+                              </div>
+                            </div>
+
+                            <div className="space-y-2">
+                              <Label className="text-sm text-gray-500">Emojis</Label>
+                              <div className="flex gap-3 text-2xl">
+                                {caption.emojis.map((emoji, emojiIndex) => (
+                                  <span key={emojiIndex} className="cursor-pointer hover:scale-110 transition-transform">
+                                    {emoji}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="flex gap-2 pt-4 border-t border-purple-100">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => copyToClipboard(fullText, index)}
+                              className="flex-1"
+                            >
+                              {copiedStates[index] ? (
+                                <>
+                                  <Check className="mr-2 h-4 w-4" />
+                                  Copied!
+                                </>
+                              ) : (
+                                <>
+                                  <Copy className="mr-2 h-4 w-4" />
+                                  Copy All
+                                </>
+                              )}
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => shareCaption(index)}
+                            >
+                              <Share2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    </motion.div>
+                  );
+                })}
+              </div>
+            ) : (
+              <Card className="border-2 border-dashed border-purple-300 bg-purple-50/80">
+                <CardContent className="py-16 text-center">
+                  <div className="w-24 h-24 rounded-full bg-linear-to-r from-purple-100 to-pink-100 flex items-center justify-center mx-auto mb-8">
+                    <Clipboard className="h-12 w-12 text-purple-600" />
+                  </div>
+                  <h3 className="text-2xl font-bold text-gray-900 mb-4">
+                    Your Captions Will Appear Here
+                  </h3>
+                  <p className="text-gray-600">
+                    {isLoggedIn ? (
+                      `Logged in as ${userEmail}. Fill in the form above to generate captions.`
+                    ) : (
+                      'Fill in the form above and click "Generate Captions Now" to create amazing content.'
+                    )}
+                  </p>
+                  {!isLoggedIn && (
+                    <p className="text-sm text-purple-600 mt-2">
+                      <a href="/auth" className="underline hover:text-purple-800">
+                        Log in
+                      </a> to save your captions
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+          </AnimatePresence>
+        </div>
+
+        {/* Footer */}
+        <footer className="mt-12 pt-8 border-t border-gray-200 text-center">
+          <div className="flex flex-col md:flex-row justify-between items-center gap-4">
+            <div className="text-left">
+              <div className="flex items-center gap-2 mb-2">
+                <div className="p-2 bg-linear-to-r from-purple-500 to-pink-500 rounded-lg">
+                  <Wand2 className="h-4 w-4 text-white" />
+                </div>
+                <span className="font-semibold text-gray-900">AI Caption Generator</span>
+              </div>
+              <p className="text-gray-500 text-sm">
+                Powered by Google Gemini AI • Create beautiful captions instantly
+              </p>
+              {isLoggedIn && (
+                <div className="mt-2 text-xs text-gray-400">
+                  Logged in as: {userEmail} • ID: {userId?.substring(0, 8)}...
+                </div>
+              )}
+            </div>
+            <div className="flex items-center gap-4 text-sm">
+              <div className="flex items-center gap-2 text-gray-600">
+                <Clock className="h-4 w-4" />
+                <span>Avg: {captions.length > 0 ? (generationTime / 1000).toFixed(1) : '--'}s</span>
+              </div>
+              <div className="flex items-center gap-2 text-gray-600">
+                <Target className="h-4 w-4" />
+                <span>{captions.length} captions</span>
+              </div>
+              {isLoggedIn && (
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  onClick={handleLogout}
+                  className="text-xs hover:bg-red-50 hover:text-red-600"
+                >
+                  <LogOut className="h-3 w-3 mr-1" />
+                  Logout
+                </Button>
+              )}
+            </div>
+          </div>
+        </footer>
+      </div>
+
+      {/* Loading Overlay */}
+      {loading && (
+        <div className="fixed inset-0 bg-white/80 flex items-center justify-center z-50">
+          <div className="text-center">
+            <div className="w-24 h-24 border-4 border-purple-600 rounded-full animate-spin border-t-transparent mx-auto"></div>
+            <p className="mt-4 text-purple-600 font-medium">
+              {isLoggedIn 
+                ? `Generating amazing captions for ${userEmail}...` 
+                : 'Generating amazing captions for you...'}
+            </p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

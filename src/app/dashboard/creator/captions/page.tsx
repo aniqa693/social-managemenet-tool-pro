@@ -1,3 +1,4 @@
+// app/page.tsx
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -10,8 +11,8 @@ import {
   Facebook, Hash, Linkedin, Zap, TrendingUp, Palette, 
   Volume2, Check, Share2, Download, Star, Clock, 
   MessageSquare, Heart, Target, Wand2,
-  ArrowDown, Clipboard, Grid, List, Eye, Filter, Database, Save, User,
-  LogOut
+  ArrowDown, Clipboard, Grid, List, Eye, Filter, Database, Save,
+  Coins, AlertCircle, CreditCard, LogIn, UserPlus
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
@@ -19,8 +20,8 @@ import { Switch } from '@/components/ui/switch';
 import { Slider } from '@/components/ui/slider';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast, { Toaster } from 'react-hot-toast';
-import { useSession } from '../../../../../lib/auth-client';// Import from your auth client
-import { signOut } from 'better-auth/api';
+import { useCredits } from '../../../../../useCredits';
+import { useSession } from '../../../../../lib/auth-client'; // Import your auth hook
 
 type CaptionType = {
   caption: string;
@@ -38,6 +39,11 @@ type NicheSuggestion = {
 };
 
 export default function Home() {
+  // Get real user session from your auth system
+  const { data: session,  } = useSession(); // Use your actual auth hook
+  const user = session?.user;
+  const isLoading = status === 'loading';
+
   // State
   const [niche, setNiche] = useState('');
   const [captions, setCaptions] = useState<CaptionType[]>([]);
@@ -56,13 +62,17 @@ export default function Home() {
   const [saving, setSaving] = useState(false);
   const [savingIndex, setSavingIndex] = useState<number | null>(null);
   const [saveStatus, setSaveStatus] = useState<{saved: boolean; recordId?: number}>({saved: false});
-
-  // Get session from Better Auth
-  const { data: session, isPending: sessionLoading } = useSession();
-  const isLoggedIn = !!session?.user;
-  const userEmail = session?.user?.email || 'guest@example.com';
-  const userName = session?.user?.name || '';
-  const userId = session?.user?.id;
+  
+  // Credit management hook with real user ID
+  const { 
+    balance, 
+    loading: creditsLoading, 
+    error: creditsError,
+    checkCredits,
+    refreshBalance,
+    toolCost,
+    fetchToolCost 
+  } = useCredits(user?.id);
 
   // Data
   const nicheSuggestions: NicheSuggestion[] = [
@@ -91,19 +101,25 @@ export default function Home() {
     { value: 'tiktok', label: 'TikTok', icon: MessageSquare, color: 'bg-gradient-to-r from-black to-gray-800' },
   ];
 
+  // Check if user can afford
+  const canAfford = user ? (balance >= toolCost) : true; // Guests can always use
+
   // Effects
   useEffect(() => {
     setShowSuggestions(niche.length > 0);
-    
-    // Log session info for debugging
-    if (session) {
-      console.log('✅ User authenticated via Better Auth:', { 
-        email: session.user.email, 
-        name: session.user.name,
-        id: session.user.id
-      });
+  }, [niche]);
+
+  // Fetch tool cost on mount
+  useEffect(() => {
+    fetchToolCost('caption_generator');
+  }, [fetchToolCost]);
+
+  // Refresh balance when user logs in
+  useEffect(() => {
+    if (user) {
+      refreshBalance();
     }
-  }, [niche, session]);
+  }, [user, refreshBalance]);
 
   // Functions
   const copyToClipboard = async (text: string, index: number) => {
@@ -147,6 +163,18 @@ export default function Home() {
       return;
     }
 
+    // Credit check for authenticated users
+    if (user && !canAfford) {
+      toast.error(
+        <div className="flex items-center gap-2">
+          <Coins className="h-5 w-5 text-yellow-500" />
+          <span>Insufficient credits! You need {toolCost} credits but have {balance}.</span>
+        </div>,
+        { duration: 5000 }
+      );
+      return;
+    }
+
     const startTime = Date.now();
     setLoading(true);
     setError('');
@@ -157,13 +185,6 @@ export default function Home() {
     const loadingToast = toast.loading('Generating creative captions... ✨');
 
     try {
-      console.log('Sending request with user:', { 
-        email: userEmail, 
-        isLoggedIn, 
-        name: userName,
-        userId
-      });
-      
       const response = await fetch('/api/generate-caption', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -173,8 +194,8 @@ export default function Home() {
           platform,
           includeTrending,
           creativityLevel: creativityLevel[0],
-          userEmail: userEmail, // This will be used if cookies don't work
-          userId: userId
+          userEmail: user?.email,
+          userId: user?.id
         }),
       });
 
@@ -183,14 +204,12 @@ export default function Home() {
       setGenerationTime(endTime - startTime);
 
       if (!response.ok) {
+        // Handle credit-specific errors
+        if (response.status === 403) {
+          throw new Error(data.message || data.error || 'Insufficient credits');
+        }
         throw new Error(data.error || 'Failed to generate captions');
       }
-
-      console.log('API Response:', {
-        captionsCount: data.captions?.length,
-        saveInfo: data.saveInfo,
-        metadata: data.metadata
-      });
 
       // Add engagement scores to generated captions
       const captionsWithScores = (data.captions || []).map((caption: CaptionType, index: number) => ({
@@ -203,28 +222,31 @@ export default function Home() {
       setCaptions(captionsWithScores);
       setCopiedStates(new Array(captionsWithScores.length).fill(false));
       
-      // Update save status
-      if (data.saveInfo?.saved) {
-        setSaveStatus({ saved: true, recordId: data.saveInfo.recordId });
-        toast.dismiss(loadingToast);
+      // Refresh balance if credits were deducted
+      if (data.creditInfo?.deducted && user) {
+        await refreshBalance();
+      }
+
+      // Show success message with credit info
+      toast.dismiss(loadingToast);
+      
+      if (data.creditInfo?.deducted) {
         toast.success(
           <div className="flex items-center gap-2">
-            <Database className="h-5 w-5 text-green-500" />
+            <Coins className="h-5 w-5 text-green-500" />
             <span>
-              Generated and saved {captionsWithScores.length} captions for {data.saveInfo.userEmail}! 🎉
+              Generated {captionsWithScores.length} captions! Used {data.creditInfo.amount} credits. 
+              Remaining: {data.creditInfo.remainingCredits}
             </span>
           </div>,
-          { duration: 4000 }
+          { duration: 5000 }
         );
       } else {
-        setSaveStatus({ saved: false });
-        toast.dismiss(loadingToast);
         toast.success(
           <div className="flex items-center gap-2">
             <Sparkles className="h-5 w-5 text-yellow-500" />
             <span>
-              Generated {captionsWithScores.length} captions in {(endTime - startTime)/1000}s! 
-              {!isLoggedIn && ' (Login to save)'}
+              Generated {captionsWithScores.length} captions in {(endTime - startTime)/1000}s!
             </span>
           </div>,
           { duration: 4000 }
@@ -237,7 +259,7 @@ export default function Home() {
       setError(errorMessage);
       toast.error(
         <div className="flex items-center gap-2">
-          <span className="text-red-500">⚠️</span>
+          <AlertCircle className="h-5 w-5 text-red-500" />
           <span>{errorMessage}</span>
         </div>
       );
@@ -288,11 +310,6 @@ export default function Home() {
 
   // Save individual caption
   const saveIndividualCaption = async (caption: CaptionType, index: number) => {
-    if (!isLoggedIn) {
-      toast.error('Please login to save captions');
-      return;
-    }
-
     setSavingIndex(index);
     const saveToast = toast.loading(`Saving caption ${index + 1}...`);
 
@@ -308,8 +325,8 @@ export default function Home() {
           tone: tone,
           includeTrending: includeTrending,
           creativityLevel: creativityLevel[0],
-          userEmail: userEmail,
-          userId: userId
+          userEmail: user?.email,
+          userId: user?.id
         }),
       });
 
@@ -323,7 +340,7 @@ export default function Home() {
       toast.success(
         <div className="flex items-center gap-2">
           <Database className="h-4 w-4 text-green-500" />
-          <span>Caption saved to your account! 💾</span>
+          <span>Caption saved! 💾</span>
         </div>,
         { duration: 2000 }
       );
@@ -337,20 +354,25 @@ export default function Home() {
     }
   };
 
-  // Handle logout with Better Auth
-  const handleLogout = async () => {
-    try {
-      await signOut();
-      toast.success('Logged out successfully!');
-    } catch (error) {
-      toast.error('Failed to logout');
-    }
+  // Sign in handlers - replace with your actual auth functions
+  const handleSignIn = () => {
+    // Replace with your actual sign in function
+    // e.g., signIn('google') or router.push('/signin')
+    toast.success('Redirecting to sign in...');
   };
 
-  if (sessionLoading) {
+  const handleSignUp = () => {
+    // Replace with your actual sign up function
+    toast.success('Redirecting to sign up...');
+  };
+
+  if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-purple-600" />
+        <div className="text-center">
+          <Loader2 className="h-12 w-12 animate-spin text-purple-600 mx-auto" />
+          <p className="mt-4 text-gray-600">Loading...</p>
+        </div>
       </div>
     );
   }
@@ -360,12 +382,76 @@ export default function Home() {
       <Toaster position="top-right" />
       
       <div className="max-w-6xl mx-auto">
-        {/* Header */}
+        {/* Header with Credit Display */}
         <header className="text-center mb-8">
-          <div className="inline-flex items-center gap-3 bg-linear-to-r from-purple-600 to-pink-600 text-white px-6 py-3 rounded-full mb-6">
-            <Wand2 className="h-6 w-6" />
-            <span className="font-semibold">AI Caption Generator</span>
+          <div className="flex justify-between items-center mb-6">
+            <div className="inline-flex items-center gap-3 bg-linear-to-r from-purple-600 to-pink-600 text-white px-6 py-3 rounded-full">
+              <Wand2 className="h-6 w-6" />
+              <span className="font-semibold">AI Caption Generator</span>
+            </div>
+            
+            {/* Auth and Credit Display */}
+            <div className="flex items-center gap-3">
+              {user ? (
+                <div className="flex items-center gap-3 bg-white shadow-md rounded-full px-6 py-3 border border-purple-200">
+                  {user.image ? (
+                    <img 
+                      src={user.image} 
+                      alt={user.name || 'User'} 
+                      className="h-8 w-8 rounded-full"
+                    />
+                  ) : (
+                    <div className="h-8 w-8 rounded-full bg-purple-200 flex items-center justify-center">
+                      <span className="text-sm font-medium text-purple-700">
+                        {user.name?.[0] || user.email?.[0] || 'U'}
+                      </span>
+                    </div>
+                  )}
+                  <div className="text-left">
+                    <p className="text-sm font-medium text-gray-900">
+                      {user.name || user.email?.split('@')[0]}
+                    </p>
+                    <div className="flex items-center gap-1">
+                      <Coins className="h-4 w-4 text-yellow-500" />
+                      <span className="text-sm font-semibold">{balance}</span>
+                      {balance < toolCost && (
+                        <Badge variant="destructive" className="text-xs ml-1">Low</Badge>
+                      )}
+                    </div>
+                  </div>
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    className="ml-2"
+                    onClick={() => toast.success('Redirecting to purchase page...')}
+                  >
+                    Buy Credits
+                  </Button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <Button 
+                    variant="outline" 
+                    size="sm"
+                    onClick={handleSignIn}
+                    className="bg-white"
+                  >
+                    <LogIn className="h-4 w-4 mr-2" />
+                    Sign In
+                  </Button>
+                  <Button 
+                    size="sm"
+                    onClick={handleSignUp}
+                    className="bg-purple-600 hover:bg-purple-700"
+                  >
+                    <UserPlus className="h-4 w-4 mr-2" />
+                    Sign Up
+                  </Button>
+                </div>
+              )}
+            </div>
           </div>
+
           <h1 className="text-4xl md:text-5xl font-bold text-gray-900 mb-3">
             <span className="bg-clip-text text-transparent bg-linear-to-r from-purple-600 via-pink-600 to-purple-600">
               Create Captivating Captions
@@ -373,18 +459,32 @@ export default function Home() {
           </h1>
           <p className="text-lg text-gray-600 max-w-2xl mx-auto">
             Enter any niche and generate beautiful, engaging social media captions instantly
-           
-            {isLoggedIn && (
-              <span className="block mt-2 text-sm text-green-600">
-                ✓ Logged in as {userEmail} • Your captions will be saved automatically
-              </span>
-            )}
           </p>
+
+          {/* Cost Display */}
+          <div className="mt-4 flex justify-center gap-4">
+            <Badge className="bg-purple-100 text-purple-800 px-4 py-2 text-sm">
+              <Coins className="h-4 w-4 mr-1 inline" />
+              Cost: {toolCost} credits per generation
+            </Badge>
+            {user && (
+              <Badge className="bg-blue-100 text-blue-800 px-4 py-2 text-sm">
+                <CreditCard className="h-4 w-4 mr-1 inline" />
+                Your balance: {balance} credits
+              </Badge>
+            )}
+            {!user && (
+              <Badge className="bg-green-100 text-green-800 px-4 py-2 text-sm">
+                <Sparkles className="h-4 w-4 mr-1 inline" />
+                Guest Mode - Free to try!
+              </Badge>
+            )}
+          </div>
         </header>
 
         {/* Input Section */}
         <div className="mb-8">
-          <Card className="shadow-lg border border-purple-200">
+          <Card className={`shadow-lg border ${!canAfford && user ? 'border-red-300 bg-red-50/30' : 'border-purple-200'}`}>
             <CardHeader>
               <CardTitle className="text-xl text-purple-700 flex items-center gap-2">
                 <Clipboard className="h-5 w-5" />
@@ -395,6 +495,48 @@ export default function Home() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
+              {/* Credit Warning for logged in users */}
+              {user && !canAfford && (
+                <div className="p-4 bg-red-50 border border-red-200 rounded-lg flex items-center gap-3">
+                  <AlertCircle className="h-5 w-5 text-red-500" />
+                  <div className="flex-1">
+                    <p className="text-red-700 font-medium">Insufficient Credits</p>
+                    <p className="text-sm text-red-600">
+                      You need {toolCost} credits to use this tool. You have {balance} credits.
+                    </p>
+                  </div>
+                  <Button 
+                    size="sm" 
+                    variant="outline" 
+                    className="border-red-300"
+                    onClick={() => toast.success('Redirecting to purchase page...')}
+                  >
+                    Buy Credits
+                  </Button>
+                </div>
+              )}
+
+              {/* Guest Mode Info */}
+              {!user && (
+                <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg flex items-center gap-3">
+                  <Sparkles className="h-5 w-5 text-blue-500" />
+                  <div className="flex-1">
+                    <p className="text-blue-700 font-medium">Guest Mode</p>
+                    <p className="text-sm text-blue-600">
+                      You're using the tool as a guest. Sign in to save your captions and use credits!
+                    </p>
+                  </div>
+                  <Button 
+                    size="sm" 
+                    variant="outline" 
+                    className="border-blue-300"
+                    onClick={handleSignIn}
+                  >
+                    Sign In
+                  </Button>
+                </div>
+              )}
+
               <div className="space-y-3">
                 <Label className="text-gray-700 flex items-center gap-2">
                   <Target className="h-5 w-5 text-purple-500" />
@@ -540,18 +682,24 @@ export default function Home() {
 
               <Button
                 onClick={generateCaptions}
-                disabled={loading || !niche.trim()}
-                className="w-full h-14 text-lg bg-linear-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700"
+                disabled={loading || !niche.trim() || (user && !canAfford)}
+                className={`w-full h-14 text-lg ${
+                  user && !canAfford
+                    ? 'bg-gray-400 cursor-not-allowed'
+                    : 'bg-linear-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700'
+                }`}
               >
                 {loading ? (
                   <>
-                    <Loader2 className="h-5 w-5 animate-spin" />
+                    <Loader2 className="h-5 w-5 animate-spin mr-2" />
                     Generating Captions...
                   </>
                 ) : (
                   <>
-                    <Wand2 className="h-5 w-5" />
-                    Generate Captions Now
+                    <Wand2 className="h-5 w-5 mr-2" />
+                    {user && !canAfford 
+                      ? `Need ${toolCost} Credits (You have ${balance})` 
+                      : `Generate Captions (${toolCost} Credits)`}
                   </>
                 )}
               </Button>
@@ -577,6 +725,12 @@ export default function Home() {
                 <div className="text-2xl font-bold text-blue-700">{(generationTime / 1000).toFixed(1)}s</div>
                 <div className="text-sm text-gray-600">Generation Time</div>
               </Card>
+              {user && (
+                <Card className="text-center p-4 bg-linear-to-br from-yellow-50 to-yellow-100 border border-yellow-200">
+                  <div className="text-2xl font-bold text-yellow-700">{balance}</div>
+                  <div className="text-sm text-gray-600">Credits Left</div>
+                </Card>
+              )}
             </motion.div>
           )}
         </div>
@@ -602,7 +756,7 @@ export default function Home() {
                   {saveStatus.saved && (
                     <span className="ml-3 text-green-600 font-medium">
                       <Database className="h-4 w-4 inline mr-1" />
-                      Saved to {userEmail}
+                      Saved successfully
                     </span>
                   )}
                 </p>
@@ -665,19 +819,20 @@ export default function Home() {
                               <Button variant="ghost" size="icon" onClick={() => toggleLike(index)}>
                                 <Star className={`h-4 w-4 ${likedCaptions.includes(index) ? 'text-yellow-500 hover:text-yellow-600' : 'text-gray-400 hover:text-yellow-500'}`} />
                               </Button>
-                              <Button 
-                                variant="ghost" 
-                                size="icon" 
-                                onClick={() => saveIndividualCaption(caption, index)}
-                                disabled={saving && savingIndex === index}
-                                title={isLoggedIn ? "Save to your account" : "Login to save"}
-                              >
-                                {saving && savingIndex === index ? (
-                                  <Loader2 className="h-4 w-4 animate-spin" />
-                                ) : (
-                                  <Save className={`h-4 w-4 ${isLoggedIn ? 'text-gray-600 hover:text-green-600' : 'text-gray-400'}`} />
-                                )}
-                              </Button>
+                              {user && (
+                                <Button 
+                                  variant="ghost" 
+                                  size="icon" 
+                                  onClick={() => saveIndividualCaption(caption, index)}
+                                  disabled={saving && savingIndex === index}
+                                >
+                                  {saving && savingIndex === index ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                  ) : (
+                                    <Save className="h-4 w-4 text-gray-600 hover:text-green-600" />
+                                  )}
+                                </Button>
+                              )}
                               <Button variant="ghost" size="icon" onClick={() => copyToClipboard(fullText, index)}>
                                 {copiedStates[index] ? <Check className="h-4 w-4 text-green-600" /> : <Copy className="h-4 w-4" />}
                               </Button>
@@ -768,19 +923,8 @@ export default function Home() {
                     Your Captions Will Appear Here
                   </h3>
                   <p className="text-gray-600">
-                    {isLoggedIn ? (
-                      `Logged in as ${userEmail}. Fill in the form above to generate captions.`
-                    ) : (
-                      'Fill in the form above and click "Generate Captions Now" to create amazing content.'
-                    )}
+                    Fill in the form above and click "Generate Captions Now" to create amazing content.
                   </p>
-                  {!isLoggedIn && (
-                    <p className="text-sm text-purple-600 mt-2">
-                      <a href="/auth" className="underline hover:text-purple-800">
-                        Log in
-                      </a> to save your captions
-                    </p>
-                  )}
                 </CardContent>
               </Card>
             )}
@@ -800,11 +944,6 @@ export default function Home() {
               <p className="text-gray-500 text-sm">
                 Powered by Google Gemini AI • Create beautiful captions instantly
               </p>
-              {isLoggedIn && (
-                <div className="mt-2 text-xs text-gray-400">
-                  Logged in as: {userEmail} • ID: {userId?.substring(0, 8)}...
-                </div>
-              )}
             </div>
             <div className="flex items-center gap-4 text-sm">
               <div className="flex items-center gap-2 text-gray-600">
@@ -815,16 +954,11 @@ export default function Home() {
                 <Target className="h-4 w-4" />
                 <span>{captions.length} captions</span>
               </div>
-              {isLoggedIn && (
-                <Button 
-                  variant="ghost" 
-                  size="sm" 
-                  onClick={handleLogout}
-                  className="text-xs hover:bg-red-50 hover:text-red-600"
-                >
-                  <LogOut className="h-3 w-3 mr-1" />
-                  Logout
-                </Button>
+              {user && (
+                <div className="flex items-center gap-2 text-gray-600">
+                  <Coins className="h-4 w-4" />
+                  <span>{balance} credits</span>
+                </div>
               )}
             </div>
           </div>
@@ -837,9 +971,7 @@ export default function Home() {
           <div className="text-center">
             <div className="w-24 h-24 border-4 border-purple-600 rounded-full animate-spin border-t-transparent mx-auto"></div>
             <p className="mt-4 text-purple-600 font-medium">
-              {isLoggedIn 
-                ? `Generating amazing captions for ${userEmail}...` 
-                : 'Generating amazing captions for you...'}
+              Generating amazing captions for you...
             </p>
           </div>
         </div>

@@ -12,7 +12,10 @@ export const user = pgTable("user", {
     .defaultNow()
     .$onUpdate(() => /* @__PURE__ */ new Date())
     .notNull(),
+      credits: integer("credits").default(0),
+
   role: text("role").default("creator"),
+  // toolname:text("tname").default("no")
 });
 
 export const session = pgTable(
@@ -99,7 +102,7 @@ export const captions = pgTable("captions", {
   plateform: varchar(),
   tone: varchar(),
   userEmail: varchar(), // REMOVED: .references(() => users.email)
-      userId: text('userId'),
+  userId: text("user_id").references(() => user.id, { onDelete: "set null" }),
 
   createdOn: varchar(),
 });
@@ -200,3 +203,22 @@ export const platformPresets = {
     aspectRatios: ['2:1', '1:1', '16:9']
   }
 } as const;
+export const creditsTransactionsTable = pgTable("credits_transactions", {
+  id: integer().primaryKey().generatedAlwaysAsIdentity(),
+  amount: integer().notNull(),
+  type: varchar({ length: 20 }).notNull(), // 'purchase', 'tool_usage', 'refund', 'bonus'
+  description: text(),
+  toolUsed: varchar({ length: 50 }),
+  remainingCredits: integer().notNull(),
+  createdAt: timestamp().defaultNow(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+}, (table) => [index("credit_userId_idx").on(table.userId)]);
+
+// Tool pricing table
+export const toolPricingTable = pgTable("tool_pricing", {
+  id: integer().primaryKey().generatedAlwaysAsIdentity(),
+  tool_name: varchar({ length: 50 }).notNull().unique(),
+  credits_required: integer().notNull(),
+});

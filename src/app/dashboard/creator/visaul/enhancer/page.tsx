@@ -1,7 +1,14 @@
-// app/dashboard/enhance-post/page.tsx (updated)
+// app/dashboard/enhance-post/page.tsx
 'use client';
 
-import { Upload, ImagePlus, X, Loader2, Download, Sparkles, Instagram, Facebook, Settings, Wand2, Sun, Droplets, Crop, Image as ImageIcon, Type, Sparkle, RotateCw, FlipHorizontal, FlipVertical, Square, Frame, Sliders, Palette, Maximize2, Minimize2, Percent, Shield, Globe, Twitter } from 'lucide-react';
+import { 
+  Upload, ImagePlus, X, Loader2, Download, Sparkles, Instagram, Facebook, 
+  Settings, Wand2, Sun, Droplets, Crop, Image as ImageIcon, Type, Sparkle, 
+  RotateCw, FlipHorizontal, FlipVertical, Square, Frame, Sliders, Palette, 
+  Maximize2, Minimize2, Percent, Shield, Globe, TrendingUp, Award, Gauge,
+  BarChart3, Activity, Zap, HardDrive, Sigma, Waves, Contrast as ContrastIcon,
+  Target, CheckCircle2, AlertCircle 
+} from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import Image from 'next/image';
 import axios from 'axios';
@@ -18,6 +25,44 @@ interface Enhancement {
   icon: any;
   description: string;
   category: 'basic' | 'creative' | 'social';
+}
+
+interface ImageMetrics {
+  brightness: number;
+  contrast: number;
+  sharpness: number;
+  colorVibrancy: number;
+  composition: number;
+  fileSize: number;
+  dimensions: {
+    width: number;
+    height: number;
+  };
+  entropy: number;
+  noise: number;
+  overall: number;
+}
+
+interface EnhancementResult {
+  success: boolean;
+  originalUrl: string;
+  enhancedUrl: string;
+  postId: number;
+  platform: string;
+  enhancementType: string;
+  metrics: {
+    original: ImageMetrics;
+    enhanced: ImageMetrics;
+    improvements: {
+      brightness: number;
+      contrast: number;
+      sharpness: number;
+      colorVibrancy: number;
+      composition: number;
+      fileSize: number;
+      overall: number;
+    };
+  };
 }
 
 const ENHANCEMENTS: Enhancement[] = [
@@ -53,6 +98,146 @@ const ASPECT_RATIOS = [
   { value: '1.91:1', label: 'Facebook 1.91:1' },
 ];
 
+// Metric Card Component for Results
+const ResultMetricCard = ({ 
+  label, 
+  value, 
+  improvement, 
+  icon: Icon,
+  color = 'purple',
+  unit = ''
+}: { 
+  label: string; 
+  value: number; 
+  improvement: number; 
+  icon: any;
+  color?: string;
+  unit?: string;
+}) => {
+  const colorClasses = {
+    purple: 'bg-purple-50 border-purple-200',
+    blue: 'bg-blue-50 border-blue-200',
+    green: 'bg-green-50 border-green-200',
+    orange: 'bg-orange-50 border-orange-200',
+  };
+
+  const getImprovementColor = (imp: number) => {
+    if (imp > 20) return 'text-green-600';
+    if (imp > 10) return 'text-green-500';
+    if (imp > 0) return 'text-green-400';
+    return 'text-gray-400';
+  };
+
+  return (
+    <div className={`p-4 rounded-lg border ${colorClasses[color as keyof typeof colorClasses] || colorClasses.purple}`}>
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <Icon className="h-4 w-4 text-gray-600" />
+          <span className="text-sm font-medium text-gray-700">{label}</span>
+        </div>
+        <span className={`text-xs font-medium ${getImprovementColor(improvement)}`}>
+          {improvement > 0 ? '+' : ''}{improvement}%
+        </span>
+      </div>
+      <div className="flex items-end justify-between">
+        <span className="text-2xl font-bold text-gray-800">
+          {Math.round(value)}{unit}
+        </span>
+        <div className="w-20 h-2 bg-gray-200 rounded-full overflow-hidden">
+          <div 
+            className={`h-full ${improvement > 0 ? 'bg-green-500' : 'bg-orange-500'}`}
+            style={{ width: `${Math.min(100, value)}%` }}
+          />
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Improvement Summary Component
+const ImprovementSummary = ({ improvements }: { improvements: EnhancementResult['metrics']['improvements'] }) => {
+  const topImprovements = Object.entries(improvements)
+    .filter(([key]) => key !== 'overall' && key !== 'fileSize')
+    .sort(([, a], [, b]) => (b as number) - (a as number))
+    .slice(0, 3);
+
+  return (
+    <div className="bg-gradient-to-r from-green-50 to-emerald-50 p-4 rounded-xl border border-green-200">
+      <h4 className="text-sm font-medium text-green-800 mb-3 flex items-center gap-2">
+        <TrendingUp className="h-4 w-4" />
+        Key Improvements
+      </h4>
+      <div className="space-y-2">
+        {topImprovements.map(([key, value]) => (
+          <div key={key} className="flex items-center justify-between">
+            <span className="text-sm text-gray-600 capitalize">{key}:</span>
+            <span className="text-sm font-semibold text-green-600">+{value}%</span>
+          </div>
+        ))}
+        <div className="pt-2 mt-2 border-t border-green-200">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-medium text-gray-700">File Size Reduction:</span>
+            <span className="text-sm font-semibold text-green-600">{improvements.fileSize}%</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Quality Score Gauge
+const QualityGauge = ({ score }: { score: number }) => {
+  const getScoreColor = (s: number) => {
+    if (s >= 80) return 'text-green-600';
+    if (s >= 60) return 'text-yellow-600';
+    if (s >= 40) return 'text-orange-600';
+    return 'text-red-600';
+  };
+
+  const getScoreLabel = (s: number) => {
+    if (s >= 80) return 'Excellent';
+    if (s >= 60) return 'Good';
+    if (s >= 40) return 'Average';
+    return 'Poor';
+  };
+
+  return (
+    <div className="text-center">
+      <div className="relative inline-flex">
+        <svg className="w-24 h-24">
+          <circle
+            className="text-gray-200"
+            strokeWidth="8"
+            stroke="currentColor"
+            fill="transparent"
+            r="36"
+            cx="48"
+            cy="48"
+          />
+          <circle
+            className={getScoreColor(score)}
+            strokeWidth="8"
+            strokeDasharray={226.2}
+            strokeDashoffset={226.2 - (226.2 * score) / 100}
+            strokeLinecap="round"
+            stroke="currentColor"
+            fill="transparent"
+            r="36"
+            cx="48"
+            cy="48"
+          />
+        </svg>
+        <div className="absolute inset-0 flex items-center justify-center">
+          <span className="text-2xl font-bold">{Math.round(score)}</span>
+        </div>
+      </div>
+      <div className={`mt-1 text-sm font-medium ${getScoreColor(score)}`}>
+        {getScoreLabel(score)}
+      </div>
+    </div>
+  );
+};
+
 export default function PostEnhancerPage() {
   const [selectedPlatform, setSelectedPlatform] = useState<Platform>('instagram');
   const [selectedEnhancement, setSelectedEnhancement] = useState<string>('basic');
@@ -60,15 +245,16 @@ export default function PostEnhancerPage() {
   const [originalImagePreview, setOriginalImagePreview] = useState<string>();
   const [enhancedImageUrl, setEnhancedImageUrl] = useState<string>('');
   const [originalImageUrl, setOriginalImageUrl] = useState<string>('');
+  const [enhancementResult, setEnhancementResult] = useState<EnhancementResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const [showResults, setShowResults] = useState(false);
   
   // Enhancement settings
   const [settings, setSettings] = useState({
     // Basic adjustments
     brightness: 1.0,
-    contrast: 1.0,
     saturation: 1.0,
     sharpness: 0.5,
     blur: 0,
@@ -134,6 +320,8 @@ export default function PostEnhancerPage() {
     setOriginalImage(file);
     setOriginalImagePreview(previewUrl);
     setEnhancedImageUrl('');
+    setEnhancementResult(null);
+    setShowResults(false);
   };
 
   const clearImage = () => {
@@ -142,6 +330,8 @@ export default function PostEnhancerPage() {
     setOriginalImage(null);
     setEnhancedImageUrl('');
     setOriginalImageUrl('');
+    setEnhancementResult(null);
+    setShowResults(false);
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
@@ -165,6 +355,8 @@ export default function PostEnhancerPage() {
     }
     
     setLoading(true);
+    setShowResults(false);
+    
     const formData = new FormData();
     formData.append('image', originalImage);
     formData.append('platform', selectedPlatform);
@@ -180,10 +372,12 @@ export default function PostEnhancerPage() {
       
       setEnhancedImageUrl(result.data.enhancedUrl);
       setOriginalImageUrl(result.data.originalUrl);
+      setEnhancementResult(result.data);
+      setShowResults(true);
       
       toast({
-        title: "Success",
-        description: "Image enhanced successfully!",
+        title: "Success! 🎉",
+        description: `Image enhanced with +${result.data.metrics.improvements.overall}% overall improvement`,
       });
       
       setRefreshTrigger(prev => prev + 1);
@@ -220,6 +414,11 @@ export default function PostEnhancerPage() {
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
+      
+      toast({
+        title: "Download started",
+        description: "Your enhanced image is being downloaded",
+      });
     } catch (error) {
       console.error('Download failed:', error);
       toast({
@@ -238,6 +437,16 @@ export default function PostEnhancerPage() {
     );
   }
 
+  const overallScore = enhancementResult?.metrics?.enhanced 
+    ? Math.round(
+        (enhancementResult.metrics.enhanced.brightness +
+         enhancementResult.metrics.enhanced.contrast +
+         enhancementResult.metrics.enhanced.sharpness +
+         enhancementResult.metrics.enhanced.colorVibrancy +
+         enhancementResult.metrics.enhanced.composition) / 5
+      )
+    : 0;
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-50 via-pink-50 to-orange-50 px-4 py-8">
       {/* Header */}
@@ -252,7 +461,7 @@ export default function PostEnhancerPage() {
         </div>
         
         <p className="text-lg text-gray-700 max-w-3xl mx-auto mb-4">
-          Enhance your images with professional tools - no AI models needed!
+          Enhance your images with professional tools - see real-time performance improvements!
         </p>
         
         {!isLoggedIn && (
@@ -338,6 +547,29 @@ export default function PostEnhancerPage() {
               accept="image/*"
               disabled={!isLoggedIn || loading}
             />
+            
+            {originalImage && enhancementResult?.metrics?.original && (
+              <div className="mt-4 p-3 bg-gray-50 rounded-lg">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-gray-600">Original Quality:</span>
+                  <span className="font-semibold">
+                    {Math.round(
+                      (enhancementResult.metrics.original.brightness +
+                       enhancementResult.metrics.original.contrast +
+                       enhancementResult.metrics.original.sharpness +
+                       enhancementResult.metrics.original.colorVibrancy +
+                       enhancementResult.metrics.original.composition) / 5
+                    )}/100
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-sm mt-1">
+                  <span className="text-gray-600">File Size:</span>
+                  <span className="font-semibold">
+                    {(enhancementResult.metrics.original.fileSize / 1024).toFixed(1)}KB
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Enhanced Image Preview */}
@@ -350,7 +582,8 @@ export default function PostEnhancerPage() {
             {loading ? (
               <div className="aspect-square rounded-xl border-2 border-purple-200 flex flex-col items-center justify-center bg-white">
                 <Loader2 className="h-8 w-8 animate-spin text-purple-600 mb-3" />
-                <p className="text-gray-600">Enhancing your image...</p>
+                <p className="text-gray-600">Analyzing and enhancing your image...</p>
+                <p className="text-xs text-gray-400 mt-2">Calculating performance metrics</p>
               </div>
             ) : enhancedImageUrl ? (
               <div className="relative aspect-square rounded-xl overflow-hidden border-2 border-green-400 group">
@@ -368,6 +601,14 @@ export default function PostEnhancerPage() {
                     <Download className="h-6 w-6 text-purple-600" />
                   </button>
                 </div>
+                
+                {/* Performance Badge */}
+                {enhancementResult && (
+                  <div className="absolute top-2 right-2 bg-green-500 text-white px-2 py-1 rounded-full text-xs flex items-center gap-1 shadow-lg">
+                    <Zap className="h-3 w-3" />
+                    +{enhancementResult.metrics.improvements.overall}% Better
+                  </div>
+                )}
               </div>
             ) : (
               <div className="aspect-square rounded-xl border-2 border-dashed border-purple-200 flex flex-col items-center justify-center bg-purple-50">
@@ -375,8 +616,176 @@ export default function PostEnhancerPage() {
                 <p className="text-gray-500">Enhanced image will appear here</p>
               </div>
             )}
+            
+            {enhancementResult && (
+              <div className="mt-4 p-3 bg-green-50 rounded-lg">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-green-700">Enhanced Quality:</span>
+                  <span className="font-semibold text-green-700">{overallScore}/100</span>
+                </div>
+                <div className="flex items-center justify-between text-sm mt-1">
+                  <span className="text-green-700">File Size:</span>
+                  <span className="font-semibold text-green-700">
+                    {(enhancementResult.metrics.enhanced.fileSize / 1024).toFixed(1)}KB
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-sm mt-1">
+                  <span className="text-green-700">Improvement:</span>
+                  <span className="font-semibold text-green-700">
+                    +{enhancementResult.metrics.improvements.overall}% Overall
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
         </div>
+
+        {/* Results Dashboard - Shows after enhancement */}
+        {showResults && enhancementResult && (
+          <div className="bg-white rounded-2xl shadow-xl p-6 border-2 border-green-200 mb-8">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
+                <BarChart3 className="h-5 w-5 text-green-600" />
+                Enhancement Results & Performance Metrics
+              </h3>
+              <div className="flex items-center gap-2 bg-green-100 px-3 py-1 rounded-full">
+                <Award className="h-4 w-4 text-green-600" />
+                <span className="text-sm font-medium text-green-700">
+                  Overall Improvement: +{enhancementResult.metrics.improvements.overall}%
+                </span>
+              </div>
+            </div>
+
+            <div className="grid md:grid-cols-4 gap-6">
+              {/* Quality Gauge */}
+              <div className="col-span-1">
+                <QualityGauge score={overallScore} />
+                <div className="mt-4 text-center">
+                  <div className="text-sm text-gray-500">Quality Score</div>
+                  <div className="text-xs text-gray-400">out of 100</div>
+                </div>
+              </div>
+
+              {/* Key Metrics */}
+              <div className="col-span-3">
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                  <ResultMetricCard
+                    label="Brightness"
+                    value={enhancementResult.metrics.enhanced.brightness}
+                    improvement={enhancementResult.metrics.improvements.brightness}
+                    icon={Sun}
+                    color="purple"
+                    unit="%"
+                  />
+                  <ResultMetricCard
+                    label="Contrast"
+                    value={enhancementResult.metrics.enhanced.contrast}
+                    improvement={enhancementResult.metrics.improvements.contrast}
+                    icon={ContrastIcon}
+                    color="blue"
+                    unit="%"
+                  />
+                  <ResultMetricCard
+                    label="Sharpness"
+                    value={enhancementResult.metrics.enhanced.sharpness}
+                    improvement={enhancementResult.metrics.improvements.sharpness}
+                    icon={Target}
+                    color="green"
+                    unit="%"
+                  />
+                  <ResultMetricCard
+                    label="Color Vibrancy"
+                    value={enhancementResult.metrics.enhanced.colorVibrancy}
+                    improvement={enhancementResult.metrics.improvements.colorVibrancy}
+                    icon={Palette}
+                    color="orange"
+                    unit="%"
+                  />
+                  <ResultMetricCard
+                    label="Composition"
+                    value={enhancementResult.metrics.enhanced.composition}
+                    improvement={enhancementResult.metrics.improvements.composition}
+                    icon={Crop}
+                    color="pink"
+                    unit="%"
+                  />
+                  <ResultMetricCard
+                    label="File Size"
+                    value={enhancementResult.metrics.enhanced.fileSize / 1024}
+                    improvement={enhancementResult.metrics.improvements.fileSize}
+                    icon={HardDrive}
+                    color="red"
+                    unit="KB"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Advanced Metrics & Insights */}
+            <div className="mt-6 grid md:grid-cols-3 gap-4">
+              {/* Improvement Summary */}
+              <ImprovementSummary improvements={enhancementResult.metrics.improvements} />
+
+              {/* Advanced Metrics */}
+              <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
+                <h4 className="text-sm font-medium text-gray-700 mb-3 flex items-center gap-2">
+                  <Activity className="h-4 w-4" />
+                  Advanced Metrics
+                </h4>
+                <div className="space-y-2">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-600">Image Entropy:</span>
+                    <span className="font-medium">{Math.round(enhancementResult.metrics.enhanced.entropy)}%</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-600">Noise Level:</span>
+                    <span className="font-medium">{Math.round(100 - enhancementResult.metrics.enhanced.noise)}%</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-600">Dimensions:</span>
+                    <span className="font-medium">
+                      {enhancementResult.metrics.enhanced.dimensions.width} x {enhancementResult.metrics.enhanced.dimensions.height}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Performance Insights */}
+              <div className="bg-purple-50 p-4 rounded-xl border border-purple-200">
+                <h4 className="text-sm font-medium text-purple-700 mb-3 flex items-center gap-2">
+                  <AlertCircle className="h-4 w-4" />
+                  Insights
+                </h4>
+                <ul className="space-y-2 text-sm">
+                  {enhancementResult.metrics.improvements.brightness > 15 && (
+                    <li className="flex items-center gap-2 text-purple-700">
+                      <CheckCircle2 className="h-3 w-3" />
+                      Brightness optimized for better visibility
+                    </li>
+                  )}
+                  {enhancementResult.metrics.improvements.sharpness > 10 && (
+                    <li className="flex items-center gap-2 text-purple-700">
+                      <CheckCircle2 className="h-3 w-3" />
+                      Sharpness enhanced for clearer details
+                    </li>
+                  )}
+                  {enhancementResult.metrics.improvements.colorVibrancy > 15 && (
+                    <li className="flex items-center gap-2 text-purple-700">
+                      <CheckCircle2 className="h-3 w-3" />
+                      Colors are now more vibrant and appealing
+                    </li>
+                  )}
+                  {enhancementResult.metrics.improvements.fileSize < 0 && (
+                    <li className="flex items-center gap-2 text-purple-700">
+                      <CheckCircle2 className="h-3 w-3" />
+                      File size reduced by {Math.abs(enhancementResult.metrics.improvements.fileSize)}%
+                    </li>
+                  )}
+                </ul>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Enhancement Controls */}
         <div className="bg-white rounded-2xl shadow-xl p-6 border-2 border-purple-100 mb-8">
@@ -637,7 +1046,7 @@ export default function PostEnhancerPage() {
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Select Filter
                 </label>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap gap-2 max-h-48 overflow-y-auto p-2">
                   <button
                     onClick={() => setSettings({...settings, filterName: ''})}
                     className={`px-3 py-1 rounded-full border text-sm ${
@@ -844,7 +1253,7 @@ export default function PostEnhancerPage() {
             {loading ? (
               <>
                 <Loader2 className="h-5 w-5 animate-spin" />
-                Enhancing...
+                Analyzing & Enhancing...
               </>
             ) : (
               <>

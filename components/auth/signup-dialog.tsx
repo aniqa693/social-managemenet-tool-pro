@@ -9,11 +9,14 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { authClient } from '../../lib/auth-client';
 import { UserRole } from '../../types/auth';
+import { db } from '../../db';
+import { user } from '../../auth-schema';
 
 interface SignUpDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
+
 
 export function SignUpDialog({ open, onOpenChange }: SignUpDialogProps) {
   const router = useRouter();
@@ -117,4 +120,4 @@ export function SignUpDialog({ open, onOpenChange }: SignUpDialogProps) {
       </DialogContent>
     </Dialog>
   );
-}
+} 

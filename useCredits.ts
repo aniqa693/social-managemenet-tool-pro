@@ -1,4 +1,4 @@
-// hooks/useCredits.ts
+
 import { useState, useEffect, useCallback } from 'react';
 
 interface UseCreditsReturn {
@@ -87,4 +87,4 @@ export function useCredits(userId?: string): UseCreditsReturn {
     toolCost,
     fetchToolCost
   };
-}
+} 

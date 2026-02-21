@@ -4,12 +4,15 @@ import { auth } from "./auth"
 export const authClient = createAuthClient({
     plugins: [inferAdditionalFields<typeof auth>()],
 
-   // plugins: [customSessionClient<typeof auth>()],
+   //plugins: [customSessionClient<typeof auth>()],
 
     /** The base URL of the server (optional if you're using the same domain) */
       baseURL: process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
 
     //baseURL: "http://localhost:3000"
+      fetchOptions: {
+    cache: 'no-store',
+  },
 })
 
 

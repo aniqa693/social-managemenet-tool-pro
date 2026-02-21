@@ -26,6 +26,7 @@ export function UserNav({ user }: UserNavProps) {
   const router = useRouter();
 
   const handleLogout = async () => {
+   
     await authClient.signOut();
     router.push('/');
   };

@@ -1,8 +1,16 @@
 // app/api/credits/check/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { CreditManager } from '../../../../../lib/credit-manager';
+import { auth } from '../../../../../lib/auth';
 
 export async function GET(req: NextRequest) {
+//   const session=await auth.api.getSession({
+//     query: {
+//         disableCookieCache: true,
+//     }, 
+//     headers: req.headers, // pass the headers
+// });
+// session?.user.role
   try {
     const { searchParams } = new URL(req.url);
     const toolName = searchParams.get('toolName');

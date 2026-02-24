@@ -1,22 +1,30 @@
 // app/api/history/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '../../../../db';
-import { captions,videoScripts,titles } from '../../../../db/schema';
-import { desc, sql } from 'drizzle-orm';
+import { captions, videoScripts, titles } from '../../../../db/schema';
+import { desc, eq, sql } from 'drizzle-orm';
+import { getServerSession } from '../../../../lib/auth-server';
 
 export async function GET(request: NextRequest) {
   try {
-    // Get user email from cookies
-    const userEmail = request.cookies.get('user-email')?.value;
+    // Get user session from Better Auth
+    const session = await getServerSession();
     
-    if (!userEmail || userEmail === 'guest@example.com') {
+    if (!session?.user || !session.user.email) {
       return NextResponse.json(
-        { error: 'User must be logged in to view history' },
+        { 
+          success: false,
+          error: 'Authentication required',
+          message: 'Please log in to view your history'
+        },
         { status: 401 }
       );
     }
 
-    console.log('📋 Fetching history for user:', userEmail);
+    const userEmail = session.user.email;
+    const userId = session.user.id;
+
+    console.log('📋 Fetching history for user:', userEmail, 'ID:', userId);
 
     // Set a timeout for the entire operation
     const controller = new AbortController();
@@ -34,10 +42,11 @@ export async function GET(request: NextRequest) {
           platform: captions.plateform,
           tone: captions.tone,
           userEmail: captions.userEmail,
+          userId: captions.userId,
           createdOn: captions.createdOn,
         })
         .from(captions)
-        .where(sql`${captions.userEmail} = ${userEmail}`)
+        .where(eq(captions.userEmail, userEmail))
         .orderBy(desc(captions.createdOn))
         .limit(20),
 
@@ -50,10 +59,11 @@ export async function GET(request: NextRequest) {
           contentType: titles.contentType,
           tone: titles.tone,
           userEmail: titles.userEmail,
+          userId: titles.userId,
           createdOn: titles.createdOn,
         })
         .from(titles)
-        .where(sql`${titles.userEmail} = ${userEmail}`)
+        .where(eq(titles.userEmail, userEmail))
         .orderBy(desc(titles.createdOn))
         .limit(20),
 
@@ -67,10 +77,11 @@ export async function GET(request: NextRequest) {
           tone: videoScripts.tone,
           duration: videoScripts.duration,
           userEmail: videoScripts.userEmail,
+          userId: videoScripts.userId,
           createdOn: videoScripts.createdOn,
         })
         .from(videoScripts)
-        .where(sql`${videoScripts.userEmail} = ${userEmail}`)
+        .where(eq(videoScripts.userEmail, userEmail))
         .orderBy(desc(videoScripts.createdOn))
         .limit(20),
       ]);
@@ -91,7 +102,7 @@ export async function GET(request: NextRequest) {
         return dateB - dateA; // Newest first
       });
 
-      console.log(`✅ Found ${allHistory.length} history items in total`);
+      console.log(`✅ Found ${allHistory.length} history items for user ${userEmail}`);
 
       return NextResponse.json({
         success: true,
@@ -101,6 +112,10 @@ export async function GET(request: NextRequest) {
           titles: titlesData.length,
           scripts: scriptsData.length,
           total: allHistory.length
+        },
+        user: {
+          email: userEmail,
+          id: userId
         },
         message: allHistory.length === 0 ? 'No history found' : undefined
       });

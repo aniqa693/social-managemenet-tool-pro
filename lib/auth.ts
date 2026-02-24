@@ -5,6 +5,7 @@ import { db } from "../db";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { user } from "../auth-schema";
 import { eq } from "drizzle-orm";
+import { customSession } from "better-auth/plugins";
 export type UserRole = 'creator' | 'analyst' | 'admin';
 
 
@@ -43,6 +44,7 @@ export const auth = betterAuth({
   },
   plugins: [nextCookies()],
 // In your auth.ts - This is already set up
+
    databaseHooks: {
     user: {
       create: {
@@ -65,7 +67,10 @@ export const auth = betterAuth({
       }
     }
   }
+
 });
+
+
 
 export type Session = typeof auth.$Infer.Session;
 export type User = typeof auth.$Infer.Session.user;

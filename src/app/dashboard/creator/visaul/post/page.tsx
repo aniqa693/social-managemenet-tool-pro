@@ -1,14 +1,17 @@
 // app/dashboard/social-posts/page.tsx
 'use client';
 
-import { Upload, ImagePlus, X, Loader2, Download, Sparkles, Instagram, Facebook } from 'lucide-react';
+import { Upload, ImagePlus, X, Loader2, Download, Sparkles, Instagram, Facebook, Coins, CreditCard, AlertCircle } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import Image from 'next/image';
 import axios from 'axios';
 import SocialPostList from '../../../../../../components/dashboard/Socialpostlist';
-import Link from 'next/link';
 import { useToast } from '../../../../../../hooks/use-toast';
 import { useSession } from '../../../../../../lib/auth-client';
+import { useCredits } from '../../../../../../useCredits';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import Link from 'next/link';
 
 // Platform and ratio configurations
 const PLATFORMS = {
@@ -51,6 +54,33 @@ export default function SocialPostGeneratorPage() {
   const { data: session, isPending: sessionLoading } = useSession();
   const isLoggedIn = !!session?.user;
   const userEmail = session?.user?.email;
+  const userId = session?.user?.id;
+
+  // Credit management hook
+  const { 
+    balance, 
+    loading: creditsLoading, 
+    error: creditsError,
+    checkCredits,
+    refreshBalance,
+    toolCost,
+    fetchToolCost 
+  } = useCredits(userId);
+
+  // Check if user can afford (3 credits per generation as specified)
+  const canAfford = isLoggedIn ? (balance >= toolCost) : false;
+
+  // Fetch tool cost on mount
+  useEffect(() => {
+    fetchToolCost('social_post_generator');
+  }, [fetchToolCost]);
+
+  // Refresh balance when user logs in
+  useEffect(() => {
+    if (userId) {
+      refreshBalance();
+    }
+  }, [userId, refreshBalance]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -88,12 +118,24 @@ export default function SocialPostGeneratorPage() {
       });
       return;
     }
+
+    // Credit check
+    if (!canAfford) {
+      toast({
+        title: "Insufficient Credits",
+        description: `You need ${toolCost} credits to generate a post. You have ${balance} credits.`,
+        variant: "destructive",
+      });
+      return;
+    }
     
     setLoading(true);
     const formData = new FormData();
     formData.append('description', userInput);
     formData.append('platform', selectedPlatform);
     formData.append('aspectRatio', selectedRatio);
+    formData.append('userId', userId || '');
+    formData.append('userEmail', userEmail || '');
     if (includeImage) formData.append('includeImage', includeImage);
     
     try {
@@ -106,13 +148,17 @@ export default function SocialPostGeneratorPage() {
       const postUrl = result.data.postUrl;
       setOutputPostImage(postUrl);
       
+      // Refresh balance after credit deduction
+      await refreshBalance();
+      
       // Clear the form
       setUserInput('');
       clearPreviews();
       
+      const remainingCredits = result.data.creditInfo?.remainingCredits || balance - toolCost;
       toast({
         title: "Success",
-        description: `${PLATFORMS[selectedPlatform].name} post generated successfully!`,
+        description: `${PLATFORMS[selectedPlatform].name} post generated! Used ${toolCost} credits. Remaining: ${remainingCredits}`,
       });
       
       // Trigger refresh of posts list
@@ -120,11 +166,21 @@ export default function SocialPostGeneratorPage() {
       
     } catch (e: any) {
       console.error('Generation error:', e);
-      toast({
-        title: "Error",
-        description: e.response?.data?.error || "Failed to generate post. Please try again.",
-        variant: "destructive",
-      });
+      
+      // Handle credit-specific errors
+      if (e.response?.status === 403) {
+        toast({
+          title: "Insufficient Credits",
+          description: e.response?.data?.message || "You don't have enough credits to generate a post.",
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "Error",
+          description: e.response?.data?.error || "Failed to generate post. Please try again.",
+          variant: "destructive",
+        });
+      }
     } finally {
       setLoading(false);
     }
@@ -200,22 +256,47 @@ export default function SocialPostGeneratorPage() {
           <p className="text-lg text-gray-700 max-w-3xl mx-auto">
             Create stunning social media posts for Instagram and Facebook with perfect dimensions for every format.
           </p>
-          {!isLoggedIn && (
-            <Link href="/auth">
-              <button className="px-6 py-2 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-full hover:from-blue-700 hover:to-purple-700 transition-all duration-200 shadow-md hover:shadow-lg transform hover:scale-105">
-                Login to Generate
-              </button>
-            </Link>
-          )}
-          {isLoggedIn && (
-            <div className="flex items-center gap-2 px-4 py-2 bg-white rounded-full shadow-md border border-blue-200">
-              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-              <p className="text-sm text-gray-700">
-                Logged in as: <span className="font-semibold text-blue-600">{userEmail}</span>
+          
+          {/* Credit Info Bar */}
+          <div className="flex flex-wrap justify-center gap-3 mt-2">
+            <Badge className="bg-purple-100 text-purple-800 px-4 py-2 text-sm shadow-sm">
+              <Coins className="h-4 w-4 mr-1 inline" />
+              Cost: {toolCost} credits per post
+            </Badge>
+            <Badge className="bg-blue-100 text-blue-800 px-4 py-2 text-sm shadow-sm">
+              <CreditCard className="h-4 w-4 mr-1 inline" />
+              Your balance: {balance} credits
+              {balance < toolCost && (
+                <span className="ml-2 text-xs text-red-600 font-bold">(Low)</span>
+              )}
+            </Badge>
+          </div>
+          
+          <div className="flex items-center gap-2 px-4 py-2 bg-white rounded-full shadow-md border border-blue-200">
+            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+            <p className="text-sm text-gray-700">
+              Logged in as: <span className="font-semibold text-blue-600">{userEmail}</span>
+            </p>
+          </div>
+        </div>
+
+        {/* Credit Warning */}
+        {balance < toolCost && (
+          <div className="max-w-2xl mx-auto p-4 bg-red-50 border border-red-200 rounded-lg flex items-center gap-3 mb-4">
+            <AlertCircle className="h-5 w-5 text-red-500 flex-shrink-0" />
+            <div className="flex-1 text-left">
+              <p className="text-red-700 font-medium">Insufficient Credits</p>
+              <p className="text-sm text-red-600">
+                You need {toolCost} credits to generate a post. You have {balance} credits.
               </p>
             </div>
-          )}
-        </div>
+            <Link href="/purchase-credits">
+              <Button size="sm" variant="outline" className="border-red-300 hover:bg-red-50">
+                Buy Credits
+              </Button>
+            </Link>
+          </div>
+        )}
       </div>
 
       {/* Platform Selector */}
@@ -231,7 +312,7 @@ export default function SocialPostGeneratorPage() {
                   setSelectedPlatform(key as 'instagram' | 'facebook');
                   setSelectedRatio(platform.ratios[0].value);
                 }}
-                disabled={!isLoggedIn || loading}
+                disabled={loading || balance < toolCost}
                 className={`flex items-center gap-3 px-6 py-3 rounded-xl font-medium transition-all duration-200 ${
                   isSelected
                     ? `bg-gradient-to-r ${platform.color} text-white shadow-lg scale-105`
@@ -254,7 +335,7 @@ export default function SocialPostGeneratorPage() {
             <button
               key={ratio.value}
               onClick={() => setSelectedRatio(ratio.value)}
-              disabled={!isLoggedIn || loading}
+              disabled={loading || balance < toolCost}
               className={`p-3 rounded-xl border-2 transition-all duration-200 ${
                 selectedRatio === ratio.value
                   ? `border-${selectedPlatform === 'instagram' ? 'purple' : 'blue'}-500 bg-gradient-to-br from-white to-${selectedPlatform === 'instagram' ? 'purple' : 'blue'}-50 shadow-md`
@@ -277,7 +358,7 @@ export default function SocialPostGeneratorPage() {
               <div className="absolute inset-0 bg-gradient-to-r from-blue-200 to-purple-200 rounded-full opacity-20 animate-pulse"></div>
             </div>
             <h2 className="text-lg font-medium mt-4 text-gray-800">Creating your {currentPlatform.name} post...</h2>
-            <p className="text-sm text-gray-500 mt-1">This usually takes less than a minute</p>
+            <p className="text-sm text-gray-500 mt-1">This will cost {toolCost} credits</p>
           </div>
         ) : (
           <div className="relative group w-full max-w-2xl">
@@ -320,6 +401,9 @@ export default function SocialPostGeneratorPage() {
                 <p className="text-sm text-gray-500 text-center mt-1">
                   Describe your post and select {selectedRatio} format
                 </p>
+                <p className="text-xs text-gray-400 mt-2">
+                  Cost: {toolCost} credits per generation
+                </p>
               </div>
             )}
           </div>
@@ -337,12 +421,12 @@ export default function SocialPostGeneratorPage() {
             placeholder={`Describe your ${currentPlatform.name} post... (e.g., "A motivational quote with mountain background" or "Product showcase for summer sale")`}
             onChange={(e) => setUserInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            disabled={!isLoggedIn || loading}
+            disabled={loading || balance < toolCost}
             className="w-full px-5 py-4 pr-14 border-2 border-blue-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent text-base bg-white text-gray-800 placeholder-gray-400 resize-none transition-all duration-200 shadow-md hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
           />
           <button
             onClick={handleSubmit}
-            disabled={loading || !isLoggedIn || !userInput}
+            disabled={loading || !userInput || balance < toolCost}
             className={`absolute right-3 bottom-3 text-white bg-gradient-to-r ${currentPlatform.color} hover:from-opacity-90 hover:to-opacity-90 p-3 cursor-pointer rounded-full shadow-lg transform hover:scale-105 active:scale-95 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none`}
             title="Generate post"
           >
@@ -354,7 +438,7 @@ export default function SocialPostGeneratorPage() {
         <div className="flex flex-col items-center gap-4">
           <label htmlFor="includeimage" className="w-full max-w-md">
             {!includeImagePreview ? (
-              <div className={`flex items-center justify-center gap-2 px-6 py-3 border-2 border-dashed border-blue-300 rounded-xl hover:border-blue-500 text-gray-700 w-full transition-all duration-200 hover:shadow-md hover:scale-[1.02] active:scale-100 cursor-pointer bg-white group relative overflow-hidden ${!isLoggedIn || loading ? 'opacity-50 cursor-not-allowed' : ''}`}>
+              <div className={`flex items-center justify-center gap-2 px-6 py-3 border-2 border-dashed border-blue-300 rounded-xl hover:border-blue-500 text-gray-700 w-full transition-all duration-200 hover:shadow-md hover:scale-[1.02] active:scale-100 cursor-pointer bg-white group relative overflow-hidden ${loading || balance < toolCost ? 'opacity-50 cursor-not-allowed' : ''}`}>
                 <div className="absolute inset-0 bg-gradient-to-r from-blue-100 to-purple-100 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
                 <div className="p-2 bg-blue-100 rounded-full group-hover:bg-blue-200 transition-colors z-10">
                   <ImagePlus className="w-5 h-5 text-blue-600" />
@@ -389,13 +473,21 @@ export default function SocialPostGeneratorPage() {
             className='hidden' 
             onChange={handleFileChange}
             accept="image/*"
-            disabled={!isLoggedIn || loading}
+            disabled={loading || balance < toolCost}
           />
         </div>
 
-        {/* Clear Form Button */}
-        {(userInput || includeImagePreview) && (
-          <div className="flex justify-center mt-4">
+        {/* Credit Info and Clear Form */}
+        <div className="flex justify-between items-center mt-4">
+          <div className="text-sm text-gray-500">
+            <Coins className="h-4 w-4 inline mr-1 text-yellow-500" />
+            Balance: <span className="font-semibold">{balance}</span> credits
+            {balance < toolCost && (
+              <span className="ml-2 text-xs text-red-500">(Need {toolCost - balance} more)</span>
+            )}
+          </div>
+          
+          {(userInput || includeImagePreview) && (
             <button
               onClick={() => {
                 setUserInput('');
@@ -406,8 +498,8 @@ export default function SocialPostGeneratorPage() {
             >
               Clear Form
             </button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
       
       <SocialPostList refreshTrigger={refreshTrigger} selectedPlatform={selectedPlatform} />

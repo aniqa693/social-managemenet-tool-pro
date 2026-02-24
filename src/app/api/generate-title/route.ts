@@ -1,10 +1,26 @@
+// app/api/generate-platform-titles/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { db } from '../../../../db';
 import { titles } from '../../../../db/schema';
-import { headers } from 'next/headers';
+import { CreditManager } from '../../../../lib/credit-manager';
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+
+// Define types for better TypeScript support
+type Platform = 'instagram' | 'facebook' | 'youtube' | 'tiktok' | 'linkedin' | 'twitter';
+type TitleStyle = 'catchy' | 'question' | 'howto' | 'list' | 'emotional' | 'controversial';
+
+interface GeneratedTitle {
+  title: string;
+  platform: Platform;
+  characterCount: number;
+  style: TitleStyle;
+}
+
+interface PlatformInstructions {
+  [key: string]: string;
+}
 
 // Helper function to save title to database
 async function saveTitleToDatabase(
@@ -39,25 +55,24 @@ async function saveTitleToDatabase(
 export async function POST(request: NextRequest) {
   try {
     const { 
-      topic, 
-      tone, 
-      contentType, 
-      includeKeywords, 
-      creativityLevel, 
-      userEmail: clientEmail,
-      userId: clientUserId,
-      count = 5
+      topic,
+      platforms,
+      style,
+      creativityLevel,
+      userEmail,
+      userId,
+      count = 12
     } = await request.json();
 
-    // For Better Auth, we'll trust the client-side session info
-    // In production, you should validate the session with Better Auth
-    const actualUserEmail = clientEmail;
-    const actualUserId = clientUserId;
-    
-    console.log('👤 Title generation for:', {
-      clientEmail,
-      clientUserId,
-      actualUserEmail
+    const actualUserId = userId;
+    const isGuestUser = !actualUserId || actualUserId === 'guest' || actualUserId === '';
+
+    console.log('👤 Title generation for platforms:', {
+      platforms,
+      style,
+      topic,
+      userEmail,
+      count
     });
 
     if (!topic) {
@@ -67,45 +82,90 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    console.log('🚀 Generating titles for:', {
+    if (!platforms || platforms.length === 0) {
+      return NextResponse.json(
+        { error: 'At least one platform is required' },
+        { status: 400 }
+      );
+    }
+
+    // Credit check for authenticated users
+    if (!isGuestUser && actualUserId) {
+      console.log('💰 Checking credits for user:', actualUserId);
+      
+      try {
+        const requiredCredits = await CreditManager.getToolCost('title_generator');
+        const creditCheck = await CreditManager.hasSufficientCredits(actualUserId, 'title_generator');
+
+        if (!creditCheck.hasCredits) {
+          return NextResponse.json(
+            { 
+              error: 'Insufficient credits',
+              requiredCredits: creditCheck.requiredCredits,
+              currentCredits: creditCheck.currentCredits,
+              message: `You need ${creditCheck.requiredCredits} credits to use this tool. You have ${creditCheck.currentCredits} credits.`
+            },
+            { status: 403 }
+          );
+        }
+      } catch (creditError) {
+        console.error('❌ Credit check error:', creditError);
+      }
+    }
+
+    console.log('🚀 Generating platform titles for:', {
       topic,
-      tone,
-      contentType,
-      includeKeywords,
+      platforms,
+      style,
       creativityLevel,
-      actualUserEmail,
       count
     });
 
     const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
 
+    // Platform-specific instructions with proper typing
+    const platformInstructions: PlatformInstructions = {
+      instagram: "Instagram: Visual, trendy, short (max 60 chars). Use emojis sparingly. Focus on aesthetics and lifestyle.",
+      facebook: "Facebook: Engaging, conversational (max 80 chars). Can be slightly longer, community-focused.",
+      youtube: "YouTube: Click-worthy, curiosity-gap (max 70 chars). Include power words like 'Ultimate', 'Best', 'Guide'.",
+      tiktok: "TikTok: Ultra-short, viral, trend-focused (max 50 chars). Use current slang and hooks.",
+      linkedin: "LinkedIn: Professional, insightful (max 70 chars). Focus on career, business, and learning.",
+      twitter: "Twitter/X: Concise, punchy (max 50 chars). Make it shareable and engaging."
+    };
+
+    const selectedPlatformInstructions = (platforms as Platform[])
+      .map((p: Platform) => platformInstructions[p] || p)
+      .join('\n');
+
     const prompt = `
-      Generate creative titles for the topic: "${topic}"
-      Content Type: ${contentType || 'blog post'}
-      Tone: ${tone || 'engaging'}
-      ${includeKeywords ? 'Include SEO-friendly keywords in titles' : ''}
+      Generate creative, catchy titles for the topic: "${topic}"
+      
+      Target Platforms (generate titles for each):
+      ${selectedPlatformInstructions}
+      
+      Title Style: ${style || 'catchy'} (catchy, question, howto, list, emotional, controversial)
       Creativity level: ${creativityLevel || 7}/10
-      Number of titles: ${count}
+      Total titles to generate: ${count} (distribute evenly across platforms)
       
-      For each title, provide:
-      1. A compelling and catchy title (max 70 characters)
-      2. A brief description (1 sentence)
-      3. Suggested tags/keywords (3-5 relevant keywords)
-      
-      Make the titles ${tone} and optimized for ${contentType}.
+      IMPORTANT RULES:
+      1. Generate ONLY the titles - NO hashtags, NO descriptions, NO emojis (unless specified)
+      2. Each title should be platform-appropriate and within character limits
+      3. Make titles attention-grabbing and click-worthy
+      4. NO punctuation at the end unless it's a question
+      5. Keep it clean and professional
       
       Return ONLY a JSON array with this exact structure:
       [
         {
-          "title": "Creative Title Here",
-          "description": "Brief description of what this title implies or covers",
-          "tags": ["tag1", "tag2", "tag3"],
+          "title": "Your Platform Title Here",
+          "platform": "instagram",
           "characterCount": 45,
-          "type": "${contentType || 'blog'}"
+          "style": "catchy"
         }
       ]
       
-      Be creative, attention-grabbing, and platform-appropriate!
+      Distribute the ${count} titles evenly across these platforms: ${(platforms as Platform[]).join(', ')}.
+      Make each title unique and optimized for its specific platform.
     `;
 
     console.log('🤖 Sending prompt to Gemini AI...');
@@ -115,42 +175,28 @@ export async function POST(request: NextRequest) {
 
     // Clean and parse JSON response
     const cleanText = text.replace(/```json|```/g, '').trim();
-    let generatedTitles;
+    let generatedTitles: GeneratedTitle[];
     
     try {
       generatedTitles = JSON.parse(cleanText);
       console.log('✅ Successfully parsed', generatedTitles.length, 'titles');
     } catch (parseError) {
       console.error('❌ JSON parsing error:', parseError);
-      const jsonMatch = cleanText.match(/\[.*\]/);
-      if (jsonMatch) {
-        try {
-          generatedTitles = JSON.parse(jsonMatch[0]);
-          console.log('✅ Extracted JSON from text:', generatedTitles.length, 'titles');
-        } catch (e) {
-          console.error('❌ Failed to extract JSON');
-          generatedTitles = [
-            {
-              title: `Amazing Insights About ${topic}`,
-              description: `Discover fascinating information about ${topic}`,
-              tags: [topic.toLowerCase(), 'insights', 'knowledge'],
-              characterCount: 35,
-              type: contentType || 'blog'
-            }
-          ];
+      
+      // Fallback titles with proper typing
+      generatedTitles = [];
+      const perPlatform = Math.ceil(count / platforms.length);
+      
+      (platforms as Platform[]).forEach((platform: Platform, index: number) => {
+        for (let i = 0; i < perPlatform; i++) {
+          generatedTitles.push({
+            title: `${i === 0 ? 'Ultimate' : 'Amazing'} ${topic} ${i === 1 ? 'Tips' : 'Guide'} for ${platform}`,
+            platform: platform,
+            characterCount: 45,
+            style: style as TitleStyle || 'catchy'
+          });
         }
-      } else {
-        console.log('⚠️ No JSON found, using fallback');
-        generatedTitles = [
-          {
-            title: `The Ultimate Guide to ${topic}`,
-            description: `Comprehensive coverage of everything about ${topic}`,
-            tags: [topic, 'guide', 'ultimate'],
-            characterCount: 32,
-            type: contentType || 'blog'
-          }
-        ];
-      }
+      });
     }
 
     // Prepare data for database
@@ -158,33 +204,32 @@ export async function POST(request: NextRequest) {
       titles: generatedTitles,
       settings: {
         topic,
-        tone,
-        contentType,
-        includeKeywords,
+        platforms,
+        style,
         creativityLevel,
-        count,
+        count: generatedTitles.length,
         generatedAt: new Date().toISOString()
       },
       metadata: {
         totalTitles: generatedTitles.length,
-        hasKeywords: includeKeywords
+        platforms: platforms
       }
     };
 
     // Save to database if user is logged in (not guest)
     let savedRecord = null;
-    const isGuestUser = !actualUserEmail || 
-                       actualUserEmail === 'guest@example.com' || 
-                       actualUserEmail.includes('guest');
+    const isGuestUserForDb = !userEmail || 
+                           userEmail === 'guest@example.com' || 
+                           userEmail.includes('guest');
     
-    if (!isGuestUser && actualUserEmail) {
+    if (!isGuestUserForDb && userEmail) {
       try {
         savedRecord = await saveTitleToDatabase(
           topic,
           contentForDB,
-          contentType || 'blog',
-          tone || 'engaging',
-          actualUserEmail,
+          'platform-titles', // contentType
+          style || 'catchy', // tone
+          userEmail,
           actualUserId
         );
         console.log('💾 Titles saved to database with ID:', savedRecord?.id);
@@ -195,23 +240,46 @@ export async function POST(request: NextRequest) {
       console.log('ℹ️ Guest user, skipping database save');
     }
 
-    // Return response
+    // Deduct credits for authenticated users
+    let creditDeductionResult = null;
+    if (!isGuestUser && actualUserId) {
+      try {
+        creditDeductionResult = await CreditManager.useTool(
+          actualUserId,
+          'title_generator',
+          `Generated ${generatedTitles.length} platform titles for: ${topic}`,
+          { topic, platforms, style, count: generatedTitles.length }
+        );
+        console.log('💰 Credit deduction result:', creditDeductionResult);
+      } catch (deductionError) {
+        console.error('❌ Credit deduction error:', deductionError);
+      }
+    }
+
     return NextResponse.json({
       success: true,
-      titles: generatedTitles,
+      titles: generatedTitles.slice(0, count), // Ensure we don't exceed requested count
+      creditInfo: creditDeductionResult ? {
+        deducted: true,
+        amount: Math.abs(creditDeductionResult.amount || 0),
+        remainingCredits: creditDeductionResult.remainingCredits,
+        transactionId: creditDeductionResult.transactionId
+      } : {
+        deducted: false,
+        message: isGuestUser ? 'Guest user - no credits deducted' : 'Credit deduction skipped'
+      },
       saveInfo: {
         saved: !!savedRecord,
         recordId: savedRecord?.id,
-        userEmail: actualUserEmail,
-        message: savedRecord ? 'Titles saved to database' : 'Titles not saved (guest user)'
+        userEmail: userEmail,
+        message: savedRecord ? 'Titles saved to database' : 'Titles not saved (guest user or error)'
       },
       metadata: {
         count: generatedTitles.length,
-        contentType: contentType || 'blog',
-        tone: tone || 'engaging',
+        platforms,
+        style,
         generatedAt: new Date().toISOString(),
-        user: isGuestUser ? 'guest' : actualUserEmail,
-        userId: actualUserId
+        user: isGuestUser ? 'guest' : userEmail
       }
     });
     

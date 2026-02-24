@@ -1,4 +1,3 @@
-
 import { useState, useEffect, useCallback } from 'react';
 
 interface UseCreditsReturn {
@@ -51,10 +50,10 @@ export function useCredits(userId?: string): UseCreditsReturn {
         setToolCost(data.cost);
         return data.cost;
       }
-      return 5; // Default fallback
+      return 3; // Default fallback
     } catch (err) {
       console.error('Failed to fetch tool cost:', err);
-      return 5; // Default fallback
+      return 3; // Default fallback
     }
   }, []);
 

@@ -12,7 +12,7 @@ import {
   Volume2, Check, Share2, Download, Star, Clock, 
   MessageSquare, Heart, Target, Wand2,
   ArrowDown, Clipboard, Grid, List, Eye, Filter, Database, Save,
-  Coins, AlertCircle, CreditCard, LogIn, UserPlus
+  Coins, AlertCircle, CreditCard
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
@@ -21,7 +21,7 @@ import { Slider } from '@/components/ui/slider';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast, { Toaster } from 'react-hot-toast';
 import { useCredits } from '../../../../../useCredits';
-import { useSession } from '../../../../../lib/auth-client'; // Import your auth hook
+import { useSession } from '../../../../../lib/auth-client';
 
 type CaptionType = {
   caption: string;
@@ -40,7 +40,7 @@ type NicheSuggestion = {
 
 export default function Home() {
   // Get real user session from your auth system
-  const { data: session,  } = useSession(); // Use your actual auth hook
+  const { data: session } = useSession();
   const user = session?.user;
   const isLoading = status === 'loading';
 
@@ -102,7 +102,7 @@ export default function Home() {
   ];
 
   // Check if user can afford
-  const canAfford = user ? (balance >= toolCost) : true; // Guests can always use
+  const canAfford = user ? (balance >= toolCost) : false;
 
   // Effects
   useEffect(() => {
@@ -164,7 +164,7 @@ export default function Home() {
     }
 
     // Credit check for authenticated users
-    if (user && !canAfford) {
+    if (!canAfford) {
       toast.error(
         <div className="flex items-center gap-2">
           <Coins className="h-5 w-5 text-yellow-500" />
@@ -230,28 +230,16 @@ export default function Home() {
       // Show success message with credit info
       toast.dismiss(loadingToast);
       
-      if (data.creditInfo?.deducted) {
-        toast.success(
-          <div className="flex items-center gap-2">
-            <Coins className="h-5 w-5 text-green-500" />
-            <span>
-              Generated {captionsWithScores.length} captions! Used {data.creditInfo.amount} credits. 
-              Remaining: {data.creditInfo.remainingCredits}
-            </span>
-          </div>,
-          { duration: 5000 }
-        );
-      } else {
-        toast.success(
-          <div className="flex items-center gap-2">
-            <Sparkles className="h-5 w-5 text-yellow-500" />
-            <span>
-              Generated {captionsWithScores.length} captions in {(endTime - startTime)/1000}s!
-            </span>
-          </div>,
-          { duration: 4000 }
-        );
-      }
+      toast.success(
+        <div className="flex items-center gap-2">
+          <Coins className="h-5 w-5 text-green-500" />
+          <span>
+            Generated {captionsWithScores.length} captions! Used {data.creditInfo?.amount || toolCost} credits. 
+            Remaining: {data.creditInfo?.remainingCredits || balance - toolCost}
+          </span>
+        </div>,
+        { duration: 5000 }
+      );
 
     } catch (err) {
       toast.dismiss(loadingToast);
@@ -354,18 +342,6 @@ export default function Home() {
     }
   };
 
-  // Sign in handlers - replace with your actual auth functions
-  const handleSignIn = () => {
-    // Replace with your actual sign in function
-    // e.g., signIn('google') or router.push('/signin')
-    toast.success('Redirecting to sign in...');
-  };
-
-  const handleSignUp = () => {
-    // Replace with your actual sign up function
-    toast.success('Redirecting to sign up...');
-  };
-
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -390,65 +366,41 @@ export default function Home() {
               <span className="font-semibold">AI Caption Generator</span>
             </div>
             
-            {/* Auth and Credit Display */}
-            <div className="flex items-center gap-3">
-              {user ? (
-                <div className="flex items-center gap-3 bg-white shadow-md rounded-full px-6 py-3 border border-purple-200">
-                  {user.image ? (
-                    <img 
-                      src={user.image} 
-                      alt={user.name || 'User'} 
-                      className="h-8 w-8 rounded-full"
-                    />
-                  ) : (
-                    <div className="h-8 w-8 rounded-full bg-purple-200 flex items-center justify-center">
-                      <span className="text-sm font-medium text-purple-700">
-                        {user.name?.[0] || user.email?.[0] || 'U'}
-                      </span>
-                    </div>
-                  )}
-                  <div className="text-left">
-                    <p className="text-sm font-medium text-gray-900">
-                      {user.name || user.email?.split('@')[0]}
-                    </p>
-                    <div className="flex items-center gap-1">
-                      <Coins className="h-4 w-4 text-yellow-500" />
-                      <span className="text-sm font-semibold">{balance}</span>
-                      {balance < toolCost && (
-                        <Badge variant="destructive" className="text-xs ml-1">Low</Badge>
-                      )}
-                    </div>
-                  </div>
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
-                    className="ml-2"
-                    onClick={() => toast.success('Redirecting to purchase page...')}
-                  >
-                    Buy Credits
-                  </Button>
-                </div>
+            {/* Credit Display for Authenticated User */}
+            <div className="flex items-center gap-3 bg-white shadow-md rounded-full px-6 py-3 border border-purple-200">
+              {user?.image ? (
+                <img 
+                  src={user.image} 
+                  alt={user.name || 'User'} 
+                  className="h-8 w-8 rounded-full"
+                />
               ) : (
-                <div className="flex items-center gap-2">
-                  <Button 
-                    variant="outline" 
-                    size="sm"
-                    onClick={handleSignIn}
-                    className="bg-white"
-                  >
-                    <LogIn className="h-4 w-4 mr-2" />
-                    Sign In
-                  </Button>
-                  <Button 
-                    size="sm"
-                    onClick={handleSignUp}
-                    className="bg-purple-600 hover:bg-purple-700"
-                  >
-                    <UserPlus className="h-4 w-4 mr-2" />
-                    Sign Up
-                  </Button>
+                <div className="h-8 w-8 rounded-full bg-purple-200 flex items-center justify-center">
+                  <span className="text-sm font-medium text-purple-700">
+                    {user?.name?.[0] || user?.email?.[0] || 'U'}
+                  </span>
                 </div>
               )}
+              <div className="text-left">
+                <p className="text-sm font-medium text-gray-900">
+                  {user?.name || user?.email?.split('@')[0]}
+                </p>
+                <div className="flex items-center gap-1">
+                  <Coins className="h-4 w-4 text-yellow-500" />
+                  <span className="text-sm font-semibold">{balance}</span>
+                  {balance < toolCost && (
+                    <Badge variant="destructive" className="text-xs ml-1">Low</Badge>
+                  )}
+                </div>
+              </div>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                className="ml-2"
+                onClick={() => toast.success('Redirecting to purchase page...')}
+              >
+                Buy Credits
+              </Button>
             </div>
           </div>
 
@@ -462,29 +414,17 @@ export default function Home() {
           </p>
 
           {/* Cost Display */}
-          <div className="mt-4 flex justify-center gap-4">
+          <div className="mt-4 flex justify-center">
             <Badge className="bg-purple-100 text-purple-800 px-4 py-2 text-sm">
               <Coins className="h-4 w-4 mr-1 inline" />
               Cost: {toolCost} credits per generation
             </Badge>
-            {user && (
-              <Badge className="bg-blue-100 text-blue-800 px-4 py-2 text-sm">
-                <CreditCard className="h-4 w-4 mr-1 inline" />
-                Your balance: {balance} credits
-              </Badge>
-            )}
-            {!user && (
-              <Badge className="bg-green-100 text-green-800 px-4 py-2 text-sm">
-                <Sparkles className="h-4 w-4 mr-1 inline" />
-                Guest Mode - Free to try!
-              </Badge>
-            )}
           </div>
         </header>
 
         {/* Input Section */}
         <div className="mb-8">
-          <Card className={`shadow-lg border ${!canAfford && user ? 'border-red-300 bg-red-50/30' : 'border-purple-200'}`}>
+          <Card className={`shadow-lg border ${!canAfford ? 'border-red-300 bg-red-50/30' : 'border-purple-200'}`}>
             <CardHeader>
               <CardTitle className="text-xl text-purple-700 flex items-center gap-2">
                 <Clipboard className="h-5 w-5" />
@@ -495,8 +435,8 @@ export default function Home() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
-              {/* Credit Warning for logged in users */}
-              {user && !canAfford && (
+              {/* Credit Warning */}
+              {!canAfford && (
                 <div className="p-4 bg-red-50 border border-red-200 rounded-lg flex items-center gap-3">
                   <AlertCircle className="h-5 w-5 text-red-500" />
                   <div className="flex-1">
@@ -512,27 +452,6 @@ export default function Home() {
                     onClick={() => toast.success('Redirecting to purchase page...')}
                   >
                     Buy Credits
-                  </Button>
-                </div>
-              )}
-
-              {/* Guest Mode Info */}
-              {!user && (
-                <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg flex items-center gap-3">
-                  <Sparkles className="h-5 w-5 text-blue-500" />
-                  <div className="flex-1">
-                    <p className="text-blue-700 font-medium">Guest Mode</p>
-                    <p className="text-sm text-blue-600">
-                      You're using the tool as a guest. Sign in to save your captions and use credits!
-                    </p>
-                  </div>
-                  <Button 
-                    size="sm" 
-                    variant="outline" 
-                    className="border-blue-300"
-                    onClick={handleSignIn}
-                  >
-                    Sign In
                   </Button>
                 </div>
               )}
@@ -682,9 +601,9 @@ export default function Home() {
 
               <Button
                 onClick={generateCaptions}
-                disabled={loading || !niche.trim() || (user && !canAfford)}
+                disabled={loading || !niche.trim() || !canAfford}
                 className={`w-full h-14 text-lg ${
-                  user && !canAfford
+                  !canAfford
                     ? 'bg-gray-400 cursor-not-allowed'
                     : 'bg-linear-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700'
                 }`}
@@ -697,7 +616,7 @@ export default function Home() {
                 ) : (
                   <>
                     <Wand2 className="h-5 w-5 mr-2" />
-                    {user && !canAfford 
+                    {!canAfford 
                       ? `Need ${toolCost} Credits (You have ${balance})` 
                       : `Generate Captions (${toolCost} Credits)`}
                   </>
@@ -725,12 +644,10 @@ export default function Home() {
                 <div className="text-2xl font-bold text-blue-700">{(generationTime / 1000).toFixed(1)}s</div>
                 <div className="text-sm text-gray-600">Generation Time</div>
               </Card>
-              {user && (
-                <Card className="text-center p-4 bg-linear-to-br from-yellow-50 to-yellow-100 border border-yellow-200">
-                  <div className="text-2xl font-bold text-yellow-700">{balance}</div>
-                  <div className="text-sm text-gray-600">Credits Left</div>
-                </Card>
-              )}
+              <Card className="text-center p-4 bg-linear-to-br from-yellow-50 to-yellow-100 border border-yellow-200">
+                <div className="text-2xl font-bold text-yellow-700">{balance}</div>
+                <div className="text-sm text-gray-600">Credits Left</div>
+              </Card>
             </motion.div>
           )}
         </div>
@@ -819,20 +736,18 @@ export default function Home() {
                               <Button variant="ghost" size="icon" onClick={() => toggleLike(index)}>
                                 <Star className={`h-4 w-4 ${likedCaptions.includes(index) ? 'text-yellow-500 hover:text-yellow-600' : 'text-gray-400 hover:text-yellow-500'}`} />
                               </Button>
-                              {user && (
-                                <Button 
-                                  variant="ghost" 
-                                  size="icon" 
-                                  onClick={() => saveIndividualCaption(caption, index)}
-                                  disabled={saving && savingIndex === index}
-                                >
-                                  {saving && savingIndex === index ? (
-                                    <Loader2 className="h-4 w-4 animate-spin" />
-                                  ) : (
-                                    <Save className="h-4 w-4 text-gray-600 hover:text-green-600" />
-                                  )}
-                                </Button>
-                              )}
+                              <Button 
+                                variant="ghost" 
+                                size="icon" 
+                                onClick={() => saveIndividualCaption(caption, index)}
+                                disabled={saving && savingIndex === index}
+                              >
+                                {saving && savingIndex === index ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  <Save className="h-4 w-4 text-gray-600 hover:text-green-600" />
+                                )}
+                              </Button>
                               <Button variant="ghost" size="icon" onClick={() => copyToClipboard(fullText, index)}>
                                 {copiedStates[index] ? <Check className="h-4 w-4 text-green-600" /> : <Copy className="h-4 w-4" />}
                               </Button>
@@ -954,12 +869,10 @@ export default function Home() {
                 <Target className="h-4 w-4" />
                 <span>{captions.length} captions</span>
               </div>
-              {user && (
-                <div className="flex items-center gap-2 text-gray-600">
-                  <Coins className="h-4 w-4" />
-                  <span>{balance} credits</span>
-                </div>
-              )}
+              <div className="flex items-center gap-2 text-gray-600">
+                <Coins className="h-4 w-4" />
+                <span>{balance} credits</span>
+              </div>
             </div>
           </div>
         </footer>
@@ -978,4 +891,4 @@ export default function Home() {
       )}
     </div>
   );
-} 
+}

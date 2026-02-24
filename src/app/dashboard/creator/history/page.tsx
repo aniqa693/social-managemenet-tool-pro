@@ -14,11 +14,13 @@ import {
   Filter, Search, Copy, Eye, Trash2, Download,
   Sparkles, MessageSquare, Film, ArrowLeft,
   Grid, List, ChevronDown, ChevronUp,
-  Users, Target, Image, Megaphone, Link, Timer,
+  Users, Target, Image, Megaphone, Timer,
   Tag, Hash as HashIcon, Camera, Play, Zap,
   TrendingUp, BarChart, Eye as EyeIcon, Volume2,
   Lightbulb, CheckCircle, AlertCircle,
-  ChevronLeft, ChevronRight, Maximize2, Minimize2
+  ChevronLeft, ChevronRight, Maximize2, Minimize2,
+  LogIn, Instagram, Facebook, Music, Briefcase,
+  Youtube
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast, { Toaster } from 'react-hot-toast';
@@ -31,7 +33,10 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from "@/components/ui/pagination";
+import { useSession } from '../../../../../lib/auth-client';
+import Link from 'next/link';
 
+// Type definitions
 type HistoryItem = {
   id: number;
   type: 'caption' | 'title' | 'script';
@@ -78,8 +83,17 @@ type TitleItem = {
   type?: string;
 };
 
+// New platform-specific title type
+type PlatformTitleItem = {
+  title: string;
+  platform: string;
+  characterCount: number;
+  style?: string;
+  score?: number;
+};
+
 type TitleContent = {
-  titles: TitleItem[];
+  titles: TitleItem[] | PlatformTitleItem[];
   settings?: {
     topic?: string;
     tone?: string;
@@ -137,6 +151,11 @@ type ScriptContent = {
 };
 
 export default function HistoryPage() {
+  // Get user session
+  const { data: session, isPending: sessionLoading } = useSession();
+  const user = session?.user;
+  const isLoggedIn = !!user;
+
   // State
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -146,7 +165,6 @@ export default function HistoryPage() {
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [expandedItems, setExpandedItems] = useState<number[]>([]);
   const [selectedTab, setSelectedTab] = useState('all');
-  const [userEmail, setUserEmail] = useState('');
   
   // Pagination states for captions and titles
   const [captionPage, setCaptionPage] = useState<Record<number, number>>({});
@@ -156,24 +174,13 @@ export default function HistoryPage() {
   const CAPTIONS_PER_PAGE = 1;
   const TITLES_PER_PAGE = 1;
 
-  // Filtered history
-  const filteredHistory = history.filter(item => {
-    // Search filter
-    const matchesSearch = searchTerm === '' || 
-      (item.userInput && item.userInput.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (item.tone && item.tone.toLowerCase().includes(searchTerm.toLowerCase()));
-    
-    // Type filter
-    const matchesType = filterType === 'all' || item.type === filterType;
-    
-    // Tab filter
-    const matchesTab = selectedTab === 'all' || item.type === selectedTab;
-    
-    return matchesSearch && matchesType && matchesTab;
-  });
-
   // Load history
   useEffect(() => {
+    if (!isLoggedIn) {
+      setLoading(false);
+      return;
+    }
+
     const fetchHistory = async () => {
       setLoading(true);
       setError('');
@@ -190,10 +197,6 @@ export default function HistoryPage() {
         
         if (data.success) {
           setHistory(data.data);
-          // Get email from first item if available
-          if (data.data.length > 0 && data.data[0].userEmail) {
-            setUserEmail(data.data[0].userEmail);
-          }
         } else {
           throw new Error(data.error || 'Failed to fetch history');
         }
@@ -206,7 +209,23 @@ export default function HistoryPage() {
     };
 
     fetchHistory();
-  }, []);
+  }, [isLoggedIn]);
+
+  // Filtered history
+  const filteredHistory = history.filter(item => {
+    // Search filter
+    const matchesSearch = searchTerm === '' || 
+      (item.userInput && item.userInput.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (item.tone && item.tone.toLowerCase().includes(searchTerm.toLowerCase()));
+    
+    // Type filter
+    const matchesType = filterType === 'all' || item.type === filterType;
+    
+    // Tab filter
+    const matchesTab = selectedTab === 'all' || item.type === selectedTab;
+    
+    return matchesSearch && matchesType && matchesTab;
+  });
 
   // Helper functions
   const toggleExpand = (id: number) => {
@@ -269,7 +288,6 @@ export default function HistoryPage() {
         `=== Caption ${idx + 1} ===\n\n${cap.caption}\n\nHashtags: ${cap.hashtags?.join(' ')}\n\nEmojis: ${cap.emojis?.join(' ')}\n\nEngagement Score: ${cap.engagementScore || 'N/A'}%\nCharacter Count: ${cap.characterCount || 'N/A'}\n`
       ).join('\n---\n\n');
       
-      // Add settings info
       if (captionContent.settings) {
         content += `\n=== Settings ===\n`;
         content += `Platform: ${captionContent.settings.platform || 'N/A'}\n`;
@@ -280,11 +298,22 @@ export default function HistoryPage() {
     } else if (item.type === 'title') {
       const titleContent = item.content as TitleContent;
       const titles = titleContent.titles || [];
-      content = titles.map((title, idx) => 
-        `=== Title ${idx + 1} ===\n\nTitle: ${title.title}\n\nDescription: ${title.description}\n\nTags: ${title.tags?.join(', ') || 'None'}\n\nCharacter Count: ${title.characterCount || 'N/A'}\nType: ${title.type || 'N/A'}\n`
-      ).join('\n---\n\n');
       
-      // Add settings info
+      // Check if this is platform-specific titles
+      const isPlatformFormat = titles.length > 0 && 'platform' in titles[0];
+      
+      if (isPlatformFormat) {
+        // Platform-specific titles format
+        content = (titles as PlatformTitleItem[]).map((title, idx) => 
+          `=== Title ${idx + 1} (${title.platform.toUpperCase()}) ===\n\nTitle: ${title.title}\n\nCharacter Count: ${title.characterCount || 'N/A'}\nStyle: ${title.style || 'N/A'}\n`
+        ).join('\n---\n\n');
+      } else {
+        // Old format with descriptions
+        content = (titles as TitleItem[]).map((title, idx) => 
+          `=== Title ${idx + 1} ===\n\nTitle: ${title.title}\n\nDescription: ${title.description}\n\nTags: ${title.tags?.join(', ') || 'None'}\n\nCharacter Count: ${title.characterCount || 'N/A'}\nType: ${title.type || 'N/A'}\n`
+        ).join('\n---\n\n');
+      }
+      
       if (titleContent.settings) {
         content += `\n=== Settings ===\n`;
         content += `Topic: ${titleContent.settings.topic || 'N/A'}\n`;
@@ -306,7 +335,7 @@ export default function HistoryPage() {
       
       if (scriptData.sections) {
         content += `📝 SCRIPT SECTIONS:\n\n`;
-        scriptData.sections.forEach((section:any, idx:any) => {
+        scriptData.sections.forEach((section: any, idx: any) => {
           content += `${idx + 1}. ${section.title || `Section ${idx + 1}`}\n`;
           if (section.duration) content += `   Duration: ${section.duration}\n`;
           if (section.content) content += `   Content: ${section.content}\n`;
@@ -327,7 +356,7 @@ export default function HistoryPage() {
       
       if (scriptData.thumbnailIdeas?.length) {
         content += `🖼️ THUMBNAIL IDEAS:\n`;
-        scriptData.thumbnailIdeas.forEach((idea:any, idx:any) => {
+        scriptData.thumbnailIdeas.forEach((idea: any, idx: any) => {
           content += `${idx + 1}. ${idea}\n`;
         });
       }
@@ -403,6 +432,32 @@ export default function HistoryPage() {
       case 'inspirational': return 'bg-pink-100 text-pink-800 border-pink-300';
       case 'engaging': return 'bg-orange-100 text-orange-800 border-orange-300';
       default: return 'bg-gray-100 text-gray-800 border-gray-300';
+    }
+  };
+
+  // Get platform color for platform-specific titles
+  const getPlatformColor = (platform: string) => {
+    const colors: Record<string, string> = {
+      instagram: 'from-purple-500 to-pink-500',
+      facebook: 'from-blue-500 to-indigo-500',
+      youtube: 'from-red-500 to-rose-500',
+      tiktok: 'from-teal-500 to-cyan-500',
+      linkedin: 'from-blue-600 to-sky-600',
+      twitter: 'from-slate-600 to-gray-600'
+    };
+    return colors[platform] || 'from-gray-500 to-gray-600';
+  };
+
+  // Get platform icon for platform-specific titles
+  const getPlatformIcon = (platform: string) => {
+    switch (platform) {
+      case 'instagram': return <Instagram className="h-4 w-4" />;
+      case 'facebook': return <Facebook className="h-4 w-4" />;
+      case 'youtube': return <Youtube className="h-4 w-4" />;
+      case 'tiktok': return <Music className="h-4 w-4" />;
+      case 'linkedin': return <Briefcase className="h-4 w-4" />;
+      case 'twitter': return <MessageSquare className="h-4 w-4" />;
+      default: return <Type className="h-4 w-4" />;
     }
   };
 
@@ -563,143 +618,230 @@ export default function HistoryPage() {
     );
   };
 
-  // Render titles with pagination - Showing 1 title per card
+  // Render titles with pagination - Updated to handle platform-specific titles
   const renderTitleContent = (content: TitleContent, itemId: number, isExpanded: boolean) => {
     if (!content || !content.titles || !Array.isArray(content.titles)) {
       return <p className="text-gray-500">No title content available</p>;
     }
     
     const titles = content.titles;
-    const currentPage = getCurrentPage(itemId, 'title');
-    const totalPages = getTotalPages(titles, 'title');
-    const paginatedTitles = getPaginatedItems(titles, itemId, 'title');
     
-    // Get current title to display
-    const currentTitle = paginatedTitles[0];
+    // Check if this is the new platform-specific format
+    const isPlatformFormat = titles.length > 0 && 'platform' in titles[0];
     
-    if (!currentTitle) {
-      return <p className="text-gray-500">No title found</p>;
-    }
-    
-    return (
-      <div className="space-y-4">
-        {content.settings?.topic && (
-          <div className="flex items-center gap-2 mb-2">
-            <Target className="h-4 w-4 text-gray-500" />
-            <span className="text-sm font-medium">Topic: {content.settings.topic}</span>
-          </div>
-        )}
-        
-        {/* Single Title Display */}
-        <div className="bg-gradient-to-r from-blue-50 to-cyan-50 p-4 rounded-xl border border-blue-200 hover:border-blue-300 transition-all min-h-[200px] flex flex-col justify-between">
-          <div>
-            <div className="flex justify-between items-start mb-3">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-gradient-to-r from-blue-500 to-cyan-500 rounded-lg">
-                  <Type className="h-4 w-4 text-white" />
+    if (isPlatformFormat) {
+      // Handle platform-specific titles
+      const platformTitles = titles as PlatformTitleItem[];
+      const currentPage = getCurrentPage(itemId, 'title');
+      const totalPages = getTotalPages(platformTitles, 'title');
+      const paginatedTitles = getPaginatedItems(platformTitles, itemId, 'title');
+      
+      // Get current title to display
+      const currentTitle = paginatedTitles[0];
+      
+      if (!currentTitle) {
+        return <p className="text-gray-500">No title found</p>;
+      }
+      
+      return (
+        <div className="space-y-4">
+          {content.settings?.topic && (
+            <div className="flex items-center gap-2 mb-2">
+              <Target className="h-4 w-4 text-gray-500" />
+              <span className="text-sm font-medium">Topic: {content.settings.topic}</span>
+            </div>
+          )}
+          
+          {/* Single Title Display with Platform Badge */}
+          <div className={`bg-gradient-to-r ${getPlatformColor(currentTitle.platform)} bg-opacity-10 p-4 rounded-xl border hover:border-blue-300 transition-all min-h-[150px] flex flex-col justify-between`}
+               style={{ background: `linear-gradient(to right, ${currentTitle.platform === 'instagram' ? '#f9a8d4, #f472b6' : 
+                                                                    currentTitle.platform === 'facebook' ? '#bfdbfe, #93c5fd' : 
+                                                                    currentTitle.platform === 'youtube' ? '#fecaca, #fca5a5' : 
+                                                                    '#e5e7eb, #d1d5db'})` }}>
+            <div>
+              <div className="flex justify-between items-start mb-3">
+                <div className="flex items-center gap-3">
+                  <div className={`p-2 bg-gradient-to-r ${getPlatformColor(currentTitle.platform)} rounded-lg text-white`}>
+                    {getPlatformIcon(currentTitle.platform)}
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <Badge className={`bg-gradient-to-r ${getPlatformColor(currentTitle.platform)} text-white border-0 capitalize`}>
+                        {currentTitle.platform}
+                      </Badge>
+                      {currentTitle.style && (
+                        <Badge variant="outline" className="text-xs capitalize bg-white/50">
+                          {currentTitle.style}
+                        </Badge>
+                      )}
+                    </div>
+                  </div>
                 </div>
-                <h4 className="font-bold text-lg text-blue-900">{getStringValue(currentTitle.title)}</h4>
+                {currentTitle.characterCount && (
+                  <Badge variant="outline" className="text-xs bg-white/50">
+                    {currentTitle.characterCount} chars
+                  </Badge>
+                )}
               </div>
-              {currentTitle.characterCount && (
-                <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-300">
-                  {currentTitle.characterCount} chars
-                </Badge>
-              )}
+              
+              <h4 className="font-bold text-lg text-gray-900 mb-2">
+                {getStringValue(currentTitle.title)}
+              </h4>
             </div>
             
-            <p className="mb-3 text-gray-600 leading-relaxed">{getStringValue(currentTitle.description)}</p>
+            {/* Platform-specific tips */}
+            <div className="mt-3 text-xs text-gray-600 italic">
+              Optimized for {currentTitle.platform.charAt(0).toUpperCase() + currentTitle.platform.slice(1)}
+            </div>
             
-            {currentTitle.tags && currentTitle.tags.length > 0 && (
-              <div className="flex flex-wrap gap-1">
-                {currentTitle.tags.map((tag, tagIdx) => (
-                  <span key={tagIdx} className="text-xs bg-gradient-to-r from-purple-500 to-pink-500 text-white px-2 py-1 rounded-full">
-                    {getStringValue(tag)}
-                  </span>
-                ))}
+            {/* Pagination for Titles */}
+            {totalPages > 1 && (
+              <div className="mt-4 pt-4 border-t border-gray-200">
+                <div className="flex items-center justify-between">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      if (currentPage > 1) {
+                        setCurrentPage(itemId, 'title', currentPage - 1);
+                      }
+                    }}
+                    disabled={currentPage === 1}
+                    className="h-8 w-8 p-0"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  
+                  <div className="text-sm text-gray-600">
+                    <span className="font-medium">{currentPage}</span> / {totalPages}
+                  </div>
+                  
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      if (currentPage < totalPages) {
+                        setCurrentPage(itemId, 'title', currentPage + 1);
+                      }
+                    }}
+                    disabled={currentPage === totalPages}
+                    className="h-8 w-8 p-0"
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </div>
+                
+                <div className="text-center text-xs text-gray-500 mt-2">
+                  Showing title {currentPage} of {platformTitles.length}
+                </div>
               </div>
             )}
           </div>
-          
-          {/* Pagination for Titles - Small compact version */}
-          {totalPages > 1 && (
-            <div className="mt-4 pt-4 border-t border-blue-200">
-              <div className="flex items-center justify-between">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    if (currentPage > 1) {
-                      setCurrentPage(itemId, 'title', currentPage - 1);
-                    }
-                  }}
-                  disabled={currentPage === 1}
-                  className="h-8 w-8 p-0"
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                </Button>
-                
-                <div className="text-sm text-gray-600">
-                  <span className="font-medium">{currentPage}</span> / {totalPages}
-                </div>
-                
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    if (currentPage < totalPages) {
-                      setCurrentPage(itemId, 'title', currentPage + 1);
-                    }
-                  }}
-                  disabled={currentPage === totalPages}
-                  className="h-8 w-8 p-0"
-                >
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
-              </div>
-              
-              {totalPages > 2 && (
-                <div className="flex justify-center gap-1 mt-2">
-                  {Array.from({ length: Math.min(4, totalPages) }, (_, i) => {
-                    let pageNumber: number;
-                    if (totalPages <= 4) {
-                      pageNumber = i + 1;
-                    } else if (currentPage <= 2) {
-                      pageNumber = i + 1;
-                    } else if (currentPage >= totalPages - 1) {
-                      pageNumber = totalPages - 3 + i;
-                    } else {
-                      pageNumber = currentPage - 1 + i;
-                    }
-                    
-                    return (
-                      <button
-                        key={pageNumber}
-                        onClick={() => setCurrentPage(itemId, 'title', pageNumber)}
-                        className={`w-8 h-8 text-sm rounded-md ${
-                          currentPage === pageNumber
-                            ? 'bg-gradient-to-r from-blue-500 to-cyan-500 text-white'
-                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                        }`}
-                      >
-                        {pageNumber}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-              
-              <div className="text-center text-xs text-gray-500 mt-2">
-                Showing title {currentPage} of {titles.length}
-              </div>
+        </div>
+      );
+    } else {
+      // Handle old format titles (with descriptions and tags)
+      const oldTitles = titles as TitleItem[];
+      const currentPage = getCurrentPage(itemId, 'title');
+      const totalPages = getTotalPages(oldTitles, 'title');
+      const paginatedTitles = getPaginatedItems(oldTitles, itemId, 'title');
+      
+      // Get current title to display
+      const currentTitle = paginatedTitles[0];
+      
+      if (!currentTitle) {
+        return <p className="text-gray-500">No title found</p>;
+      }
+      
+      return (
+        <div className="space-y-4">
+          {content.settings?.topic && (
+            <div className="flex items-center gap-2 mb-2">
+              <Target className="h-4 w-4 text-gray-500" />
+              <span className="text-sm font-medium">Topic: {content.settings.topic}</span>
             </div>
           )}
+          
+          {/* Single Title Display */}
+          <div className="bg-gradient-to-r from-blue-50 to-cyan-50 p-4 rounded-xl border border-blue-200 hover:border-blue-300 transition-all min-h-[200px] flex flex-col justify-between">
+            <div>
+              <div className="flex justify-between items-start mb-3">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-gradient-to-r from-blue-500 to-cyan-500 rounded-lg">
+                    <Type className="h-4 w-4 text-white" />
+                  </div>
+                  <h4 className="font-bold text-lg text-blue-900">{getStringValue(currentTitle.title)}</h4>
+                </div>
+                {currentTitle.characterCount && (
+                  <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-300">
+                    {currentTitle.characterCount} chars
+                  </Badge>
+                )}
+              </div>
+              
+              <p className="mb-3 text-gray-600 leading-relaxed">{getStringValue(currentTitle.description)}</p>
+              
+              {currentTitle.tags && currentTitle.tags.length > 0 && (
+                <div className="flex flex-wrap gap-1">
+                  {currentTitle.tags.map((tag, tagIdx) => (
+                    <span key={tagIdx} className="text-xs bg-gradient-to-r from-purple-500 to-pink-500 text-white px-2 py-1 rounded-full">
+                      {getStringValue(tag)}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+            
+            {/* Pagination for Titles */}
+            {totalPages > 1 && (
+              <div className="mt-4 pt-4 border-t border-blue-200">
+                <div className="flex items-center justify-between">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      if (currentPage > 1) {
+                        setCurrentPage(itemId, 'title', currentPage - 1);
+                      }
+                    }}
+                    disabled={currentPage === 1}
+                    className="h-8 w-8 p-0"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  
+                  <div className="text-sm text-gray-600">
+                    <span className="font-medium">{currentPage}</span> / {totalPages}
+                  </div>
+                  
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      if (currentPage < totalPages) {
+                        setCurrentPage(itemId, 'title', currentPage + 1);
+                      }
+                    }}
+                    disabled={currentPage === totalPages}
+                    className="h-8 w-8 p-0"
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </div>
+                
+                <div className="text-center text-xs text-gray-500 mt-2">
+                  Showing title {currentPage} of {oldTitles.length}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
-      </div>
-    );
+      );
+    }
   };
 
   // Render script content - Collapsible by default, expands on click
-  const renderScriptContent = (content: ScriptContent, isExpanded: boolean) => {
+  const renderScriptContent = (content: ScriptContent, itemId: number, isExpanded: boolean) => {
     if (!content) return <p className="text-gray-500">No script content available</p>;
     
     const scriptData = content.script || content;
@@ -759,7 +901,7 @@ export default function HistoryPage() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => {}}
+                onClick={() => toggleExpand(itemId)}
                 className="w-full"
               >
                 <Maximize2 className="h-4 w-4 mr-2" />
@@ -882,7 +1024,7 @@ export default function HistoryPage() {
               </Badge>
             </div>
             
-            {scriptData.sections.map((section:any, idx:any) => (
+            {scriptData.sections.map((section: any, idx: any) => (
               <div key={idx} className="bg-gradient-to-r from-white to-gray-50 p-5 rounded-xl border border-gray-200 hover:border-blue-300 transition-all shadow-sm">
                 <div className="flex items-start justify-between mb-4">
                   <div className="flex items-center gap-3">
@@ -921,7 +1063,7 @@ export default function HistoryPage() {
                       <span className="font-medium text-purple-700">Visual Cues</span>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      {section.visualCues.map((cue:any, cueIdx:any) => (
+                      {section.visualCues.map((cue: any, cueIdx: any) => (
                         <div key={cueIdx} className="bg-gradient-to-r from-purple-50 to-pink-50 px-3 py-2 rounded-lg border border-purple-100">
                           <span className="text-sm text-purple-800">{cue}</span>
                         </div>
@@ -964,7 +1106,7 @@ export default function HistoryPage() {
               <h4 className="text-lg font-bold text-gray-800">Hashtags</h4>
             </div>
             <div className="flex flex-wrap gap-2">
-              {scriptData.hashtags.map((tag:any, idx:any) => (
+              {scriptData.hashtags.map((tag: any, idx: any) => (
                 <span key={idx} className="bg-gradient-to-r from-blue-500 to-blue-600 text-white px-3 py-1.5 rounded-full text-sm font-medium">
                   {tag}
                 </span>
@@ -981,7 +1123,7 @@ export default function HistoryPage() {
               <h4 className="text-lg font-bold text-purple-800">Thumbnail Ideas</h4>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {scriptData.thumbnailIdeas.map((idea:any, idx:any) => (
+              {scriptData.thumbnailIdeas.map((idea: any, idx: any) => (
                 <div key={idx} className="bg-white p-4 rounded-lg border shadow-sm">
                   <div className="flex items-start gap-2">
                     <div className="p-2 bg-purple-100 rounded-lg">
@@ -1012,7 +1154,7 @@ export default function HistoryPage() {
         return renderTitleContent(item.content as TitleContent, item.id, isExpanded);
         
       case 'script':
-        return renderScriptContent(item.content as ScriptContent, isExpanded);
+        return renderScriptContent(item.content as ScriptContent, item.id, isExpanded);
         
       default:
         return (
@@ -1025,6 +1167,47 @@ export default function HistoryPage() {
         );
     }
   };
+
+  if (sessionLoading || loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="h-12 w-12 animate-spin text-purple-600 mx-auto mb-4" />
+          <p className="text-gray-600">Loading your history...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isLoggedIn) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-4 md:p-8 flex items-center justify-center">
+        <Card className="max-w-md w-full">
+          <CardHeader>
+            <CardTitle className="text-center">Authentication Required</CardTitle>
+            <CardDescription className="text-center">
+              Please log in to view your history
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="text-center">
+            <div className="w-20 h-20 rounded-full bg-purple-100 flex items-center justify-center mx-auto mb-6">
+              <LogIn className="h-10 w-10 text-purple-600" />
+            </div>
+            <p className="mb-6 text-gray-600">
+              You need to be logged in to see your generated content history.
+            </p>
+          </CardContent>
+          <CardFooter className="flex justify-center">
+            <Link href="/auth">
+              <Button className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700">
+                Go to Login
+              </Button>
+            </Link>
+          </CardFooter>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-4 md:p-8">
@@ -1082,7 +1265,7 @@ export default function HistoryPage() {
           
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <p className="text-gray-600">
-              {userEmail ? `Viewing history for ${userEmail}` : 'Your generated content history'}
+              {user?.email ? `Viewing history for ${user.email}` : 'Your generated content history'}
             </p>
             
             <div className="text-sm text-gray-500">
@@ -1170,7 +1353,7 @@ export default function HistoryPage() {
         </Card>
 
         {/* Stats */}
-        {!loading && history.length > 0 && (
+        {history.length > 0 && (
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
             <Card className="text-center p-4 bg-gradient-to-br from-purple-50 to-purple-100 border border-purple-200">
               <div className="text-2xl font-bold text-purple-700">
@@ -1200,12 +1383,7 @@ export default function HistoryPage() {
         )}
 
         {/* Content */}
-        {loading ? (
-          <div className="text-center py-20">
-            <Loader2 className="h-12 w-12 animate-spin text-purple-600 mx-auto mb-4" />
-            <p className="text-gray-600">Loading your history...</p>
-          </div>
-        ) : error ? (
+        {error ? (
           <Card className="border-red-200 bg-red-50">
             <CardContent className="p-8 text-center">
               <p className="text-red-600 mb-4">{error}</p>

@@ -3,7 +3,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { db } from '../../../../db';
 import { captions } from '../../../../db/schema';
-import { headers } from 'next/headers';
 import { CreditManager } from '../../../../lib/credit-manager';
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
@@ -22,7 +21,7 @@ async function saveToDatabase(
     
     const result = await db.insert(captions).values({
       userInput,
-      content, // Keep as is - your original code works
+      content,
       plateform: platform,
       tone,
       userEmail,
@@ -46,23 +45,14 @@ export async function POST(request: NextRequest) {
       platform, 
       includeTrending, 
       creativityLevel, 
-      userEmail: clientEmail,
-      userId: clientUserId
+      userEmail,
+      userId
     } = await request.json();
 
-    // Better Auth session check
-    const headersList = headers();
-    const sessionToken = request.cookies.get('better-auth.session_token')?.value;
-    
-    // Use the client-provided user info
-    const actualUserEmail = clientEmail;
-    const actualUserId = clientUserId;
-    
     console.log('👤 User identification:', {
-      clientEmail,
-      clientUserId,
-      hasSessionToken: !!sessionToken,
-      actualUserEmail
+      userEmail,
+      userId,
+      hasUser: !!userEmail && !!userId
     });
 
     if (!niche) {
@@ -72,45 +62,46 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Check if user is authenticated (not guest)
-    const isGuestUser = !actualUserId || actualUserId === 'guest' || actualUserId === '';
+    // Ensure user is authenticated
+    if (!userId || !userEmail) {
+      return NextResponse.json(
+        { error: 'Authentication required' },
+        { status: 401 }
+      );
+    }
 
-    // CREDIT CHECK - Only for authenticated users (but don't block if credit check fails)
-    let creditCheckPassed = true;
+    // CREDIT CHECK - Required for authenticated users
     let requiredCredits = 2; // Default
     
-    if (!isGuestUser && actualUserId) {
-      console.log('💰 Checking credits for user:', actualUserId);
+    console.log('💰 Checking credits for user:', userId);
+    
+    try {
+      // Get tool cost
+      requiredCredits = await CreditManager.getToolCost('caption_generator');
       
-      try {
-        // Get tool cost
-        requiredCredits = await CreditManager.getToolCost('caption_generator');
-        
-        // Check if user has sufficient credits
-        const creditCheck = await CreditManager.hasSufficientCredits(actualUserId, 'caption_generator');
-        
-        console.log('💰 Credit check result:', creditCheck);
+      // Check if user has sufficient credits
+      const creditCheck = await CreditManager.hasSufficientCredits(userId, 'caption_generator');
+      
+      console.log('💰 Credit check result:', creditCheck);
 
-        if (!creditCheck.hasCredits) {
-          // Return insufficient credits error - block the request
-          return NextResponse.json(
-            { 
-              error: 'Insufficient credits',
-              requiredCredits: creditCheck.requiredCredits,
-              currentCredits: creditCheck.currentCredits,
-              message: `You need ${creditCheck.requiredCredits} credits to use this tool. You have ${creditCheck.currentCredits} credits.`
-            },
-            { status: 403 }
-          );
-        }
-        
-        creditCheckPassed = true;
-      } catch (creditError) {
-        console.error('❌ Credit check error:', creditError);
-        // If credit check fails for authenticated user, we should still allow generation
-        // but log the error and continue
-        console.log('⚠️ Credit check failed but allowing generation to proceed');
+      if (!creditCheck.hasCredits) {
+        return NextResponse.json(
+          { 
+            error: 'Insufficient credits',
+            requiredCredits: creditCheck.requiredCredits,
+            currentCredits: creditCheck.currentCredits,
+            message: `You need ${creditCheck.requiredCredits} credits to use this tool. You have ${creditCheck.currentCredits} credits.`
+          },
+          { status: 403 }
+        );
       }
+      
+    } catch (creditError) {
+      console.error('❌ Credit check error:', creditError);
+      return NextResponse.json(
+        { error: 'Failed to verify credits. Please try again.' },
+        { status: 500 }
+      );
     }
 
     console.log('🚀 Generating captions for:', {
@@ -119,11 +110,11 @@ export async function POST(request: NextRequest) {
       platform,
       includeTrending,
       creativityLevel,
-      actualUserEmail
+      userEmail
     });
 
     // Use the model name that works for you
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' }); // Keep your working model
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
 
     const prompt = `
       Generate social media content for the niche: "${niche}"
@@ -156,7 +147,7 @@ export async function POST(request: NextRequest) {
     const response = await result.response;
     const text = response.text();
 
-    // Clean and parse JSON response - exactly as your original code
+    // Clean and parse JSON response
     const cleanText = text.replace(/```json|```/g, '').trim();
     let generatedCaptions;
     
@@ -192,7 +183,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Prepare data for database - same as your original
+    // Prepare data for database
     const contentForDB = {
       captions: generatedCaptions,
       settings: {
@@ -209,77 +200,67 @@ export async function POST(request: NextRequest) {
       }
     };
 
-    // DEDUCT CREDITS - Only for authenticated users after successful generation
-    // Do this BEFORE saving to database
+    // DEDUCT CREDITS for authenticated user
     let creditDeductionResult = null;
-    if (!isGuestUser && actualUserId && creditCheckPassed) {
-      console.log('💰 Deducting credits for user:', actualUserId);
-      
-      try {
-        creditDeductionResult = await CreditManager.useTool(
-          actualUserId,
-          'caption_generator',
-          `Generated ${generatedCaptions.length} captions for niche: ${niche}`,
-          { niche, platform, tone }
-        );
-
-        console.log('💰 Credit deduction result:', creditDeductionResult);
-      } catch (deductionError) {
-        console.error('❌ Credit deduction error:', deductionError);
-        // Continue even if deduction fails - we already generated captions
-      }
-    }
-
-    // Save to database if user is logged in (not guest) - exactly as your original
-    let savedRecord = null;
-    const isGuestUserForDb = !actualUserEmail || 
-                           actualUserEmail === 'guest@example.com' || 
-                           actualUserEmail.includes('guest');
     
-    if (!isGuestUserForDb && actualUserEmail) {
-      try {
-        savedRecord = await saveToDatabase(
-          niche,
-          contentForDB,
-          platform || 'instagram',
-          tone || 'friendly',
-          actualUserEmail,
-          actualUserId
-        );
-        console.log('💾 Captions saved to database with ID:', savedRecord?.id);
-      } catch (dbError) {
-        console.error('⚠️ Failed to save to database, but continuing with response:', dbError);
-      }
-    } else {
-      console.log('ℹ️ Guest user, skipping database save');
+    console.log('💰 Deducting credits for user:', userId);
+    
+    try {
+      creditDeductionResult = await CreditManager.useTool(
+        userId,
+        'caption_generator',
+        `Generated ${generatedCaptions.length} captions for niche: ${niche}`,
+        { niche, platform, tone }
+      );
+
+      console.log('💰 Credit deduction result:', creditDeductionResult);
+    } catch (deductionError) {
+      console.error('❌ Credit deduction error:', deductionError);
+      return NextResponse.json(
+        { error: 'Failed to process credits. Please try again.' },
+        { status: 500 }
+      );
     }
 
-    // Return response - maintaining your original structure but adding credit info
+    // Save to database
+    let savedRecord = null;
+    
+    try {
+      savedRecord = await saveToDatabase(
+        niche,
+        contentForDB,
+        platform || 'instagram',
+        tone || 'friendly',
+        userEmail,
+        userId
+      );
+      console.log('💾 Captions saved to database with ID:', savedRecord?.id);
+    } catch (dbError) {
+      console.error('⚠️ Failed to save to database, but continuing with response:', dbError);
+    }
+
+    // Return response - FIXED: removed reference to undefined 'balance'
     return NextResponse.json({
       success: true,
-      captions: generatedCaptions, // Your working captions
-      creditInfo: creditDeductionResult ? {
+      captions: generatedCaptions,
+      creditInfo: {
         deducted: true,
-        amount: Math.abs(creditDeductionResult.amount || 0),
-        remainingCredits: creditDeductionResult.remainingCredits,
-        transactionId: creditDeductionResult.transactionId
-      } : {
-        deducted: false,
-        message: isGuestUser ? 'Guest user - no credits deducted' : 'Credit deduction skipped'
+        amount: Math.abs(creditDeductionResult?.amount || requiredCredits),
+        remainingCredits: creditDeductionResult?.remainingCredits || 0,
+        transactionId: creditDeductionResult?.transactionId
       },
       saveInfo: {
         saved: !!savedRecord,
         recordId: savedRecord?.id,
-        userEmail: actualUserEmail,
-        message: savedRecord ? 'Captions saved to database' : 'Captions not saved (guest user)'
+        userEmail: userEmail,
+        message: savedRecord ? 'Captions saved to database' : 'Failed to save captions'
       },
       metadata: {
         count: generatedCaptions.length,
         platform: platform || 'instagram',
         tone: tone || 'friendly',
         generatedAt: new Date().toISOString(),
-        user: isGuestUser ? 'guest' : actualUserEmail,
-        userId: actualUserId
+        userId: userId
       }
     });
     

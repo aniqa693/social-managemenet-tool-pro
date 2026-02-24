@@ -1,7 +1,7 @@
-//dashboard/thumbanils
+// app/dashboard/thumbnails/page.tsx
 'use client';
 
-import { Upload, User, ImagePlus, X, Loader2, Download, Sparkles } from 'lucide-react';
+import { Upload, User, ImagePlus, X, Loader2, Download, Sparkles, Coins, CreditCard, AlertCircle } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react'; 
 import Image from 'next/image';
 import axios from 'axios';
@@ -9,6 +9,9 @@ import ThumbnailList from '../../../../../../components/thumbnaill';
 import Link from 'next/link';
 import { useToast } from '../../../../../../hooks/use-toast';
 import { useSession } from '../../../../../../lib/auth-client';
+import { useCredits } from '../../../../../../useCredits';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 
 export default function ThumbnailGeneratorPage() {
   const [inputUser, setInputUser] = useState<string>('');
@@ -25,10 +28,45 @@ export default function ThumbnailGeneratorPage() {
   const { data: session, isPending: sessionLoading } = useSession();
   const isLoggedIn = !!session?.user;
   const userEmail = session?.user?.email;
+  const userId = session?.user?.id;
+
+  // Credit management hook
+  const { 
+    balance, 
+    loading: creditsLoading, 
+    error: creditsError,
+    checkCredits,
+    refreshBalance,
+    toolCost,
+    fetchToolCost 
+  } = useCredits(userId);
+
+  // Check if user can afford (set cost to 3 credits per generation)
+  const canAfford = isLoggedIn ? (balance >= toolCost) : false;
+
+  // Fetch tool cost on mount
+  useEffect(() => {
+    fetchToolCost('thumbnail_generator');
+  }, [fetchToolCost]);
+
+  // Refresh balance when user logs in
+  useEffect(() => {
+    if (userId) {
+      refreshBalance();
+    }
+  }, [userId, refreshBalance]);
 
   const handleFileChange = (field: string, e: any) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    
+    // Clean up previous preview
+    if (field === 'referenceimage' && referenceImagePreview) {
+      URL.revokeObjectURL(referenceImagePreview);
+    } else if (field === 'includeimage' && includeFacePreview) {
+      URL.revokeObjectURL(includeFacePreview);
+    }
+    
     const previewUrl = URL.createObjectURL(file);
     if (field === 'referenceimage') {
       setReferenceImage(file);
@@ -66,12 +104,24 @@ export default function ThumbnailGeneratorPage() {
       });
       return;
     }
+
+    // Credit check
+    if (!canAfford) {
+      toast({
+        title: "Insufficient Credits",
+        description: `You need ${toolCost} credits to generate a thumbnail. You have ${balance} credits.`,
+        variant: "destructive",
+      });
+      return;
+    }
     
     setLoading(true);
     const formData = new FormData();
     if (inputUser) formData.append('description', inputUser);
     if (referenceImage) formData.append('referenceImage', referenceImage);
     if (includeFace) formData.append('includeFace', includeFace);
+    formData.append('userId', userId || '');
+    formData.append('userEmail', userEmail || '');
     
     try {
       const result = await axios.post('/api/generate-thumbnail', formData, {
@@ -83,13 +133,18 @@ export default function ThumbnailGeneratorPage() {
       const thumbnailUrl = result.data.thumbnailUrl;
       setOutputThumbnailImage(thumbnailUrl);
       
+      // Refresh balance after credit deduction
+      await refreshBalance();
+      
       // Clear the form
       setInputUser('');
       clearPreviews();
       
+      // Show success message with credit info
+      const remainingCredits = result.data.creditInfo?.remainingCredits || balance - toolCost;
       toast({
         title: "Success",
-        description: "Thumbnail generated successfully!",
+        description: `Thumbnail generated! Used ${toolCost} credits. Remaining: ${remainingCredits}`,
       });
       
       // Trigger refresh of thumbnail list
@@ -97,11 +152,21 @@ export default function ThumbnailGeneratorPage() {
       
     } catch (e: any) {
       console.error('Generation error:', e);
-      toast({
-        title: "Error",
-        description: e.response?.data?.error || "Failed to generate thumbnail. Please try again.",
-        variant: "destructive",
-      });
+      
+      // Handle credit-specific errors
+      if (e.response?.status === 403) {
+        toast({
+          title: "Insufficient Credits",
+          description: e.response?.data?.message || "You don't have enough credits to generate a thumbnail.",
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "Error",
+          description: e.response?.data?.error || "Failed to generate thumbnail. Please try again.",
+          variant: "destructive",
+        });
+      }
     } finally {
       setLoading(false);
     }
@@ -174,22 +239,47 @@ export default function ThumbnailGeneratorPage() {
           <p className="text-lg text-gray-700 max-w-3xl mx-auto">
             Turn any video into a click magnet with thumbnails that grab attention and drive views.
           </p>
-          {!isLoggedIn && (
-            <Link href="/auth">
-              <button className="px-6 py-2 bg-gradient-to-r from-pink-600 to-rose-600 text-white rounded-full hover:from-pink-700 hover:to-rose-700 transition-all duration-200 shadow-md hover:shadow-lg transform hover:scale-105">
-                Login to Generate
-              </button>
-            </Link>
-          )}
-          {isLoggedIn && (
-            <div className="flex items-center gap-2 px-4 py-2 bg-white rounded-full shadow-md border border-pink-200">
-              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-              <p className="text-sm text-gray-700">
-                Logged in as: <span className="font-semibold text-pink-600">{userEmail}</span>
+          
+          {/* Credit Info Bar */}
+          <div className="flex flex-wrap justify-center gap-3 mt-2">
+            <Badge className="bg-purple-100 text-purple-800 px-4 py-2 text-sm shadow-sm">
+              <Coins className="h-4 w-4 mr-1 inline" />
+              Cost: {toolCost} credits per thumbnail
+            </Badge>
+            <Badge className="bg-blue-100 text-blue-800 px-4 py-2 text-sm shadow-sm">
+              <CreditCard className="h-4 w-4 mr-1 inline" />
+              Your balance: {balance} credits
+              {balance < toolCost && (
+                <span className="ml-2 text-xs text-red-600 font-bold">(Low)</span>
+              )}
+            </Badge>
+          </div>
+          
+          <div className="flex items-center gap-2 px-4 py-2 bg-white rounded-full shadow-md border border-pink-200">
+            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+            <p className="text-sm text-gray-700">
+              Logged in as: <span className="font-semibold text-pink-600">{userEmail}</span>
+            </p>
+          </div>
+        </div>
+
+        {/* Credit Warning */}
+        {balance < toolCost && (
+          <div className="max-w-2xl mx-auto p-4 bg-red-50 border border-red-200 rounded-lg flex items-center gap-3 mb-4">
+            <AlertCircle className="h-5 w-5 text-red-500 flex-shrink-0" />
+            <div className="flex-1 text-left">
+              <p className="text-red-700 font-medium">Insufficient Credits</p>
+              <p className="text-sm text-red-600">
+                You need {toolCost} credits to generate a thumbnail. You have {balance} credits.
               </p>
             </div>
-          )}
-        </div>
+            <Link href="/purchase-credits">
+              <Button size="sm" variant="outline" className="border-red-300 hover:bg-red-50">
+                Buy Credits
+              </Button>
+            </Link>
+          </div>
+        )}
       </div>
 
       {/* Thumbnail Preview Section */}
@@ -201,7 +291,7 @@ export default function ThumbnailGeneratorPage() {
               <div className="absolute inset-0 bg-gradient-to-r from-pink-200 to-rose-200 rounded-full opacity-20 animate-pulse"></div>
             </div>
             <h2 className="text-lg font-medium mt-4 text-gray-800">Generating your thumbnail...</h2>
-            <p className="text-sm text-gray-500 mt-1">This usually takes less than a minute</p>
+            <p className="text-sm text-gray-500 mt-1">This will cost {toolCost} credits</p>
           </div>
         ) : (
           <div className="relative group w-full max-w-2xl">
@@ -234,6 +324,9 @@ export default function ThumbnailGeneratorPage() {
                 </div>
                 <h3 className="text-lg font-medium text-gray-800 text-center">Your thumbnail will appear here</h3>
                 <p className="text-sm text-gray-500 text-center mt-1">Enter a description or upload images to generate a thumbnail</p>
+                <p className="text-xs text-gray-400 mt-2">
+                  Cost: {toolCost} credits per generation
+                </p>
               </div>
             )}
           </div>
@@ -251,12 +344,12 @@ export default function ThumbnailGeneratorPage() {
             placeholder="Describe your video content or enter your video title..."
             onChange={(e) => setInputUser(e.target.value)}
             onKeyDown={handleKeyDown}
-            disabled={!isLoggedIn || loading}
+            disabled={loading || balance < toolCost}
             className="w-full px-5 py-4 pr-14 border-2 border-pink-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-pink-400 focus:border-transparent text-base bg-white text-gray-800 placeholder-gray-400 resize-none transition-all duration-200 shadow-md hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
           />
           <button
             onClick={handleSubmit}
-            disabled={loading || !isLoggedIn || (!inputUser && !referenceImage && !includeFace)}
+            disabled={loading || (!inputUser && !referenceImage && !includeFace) || balance < toolCost}
             className="absolute right-3 bottom-3 text-white bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-700 hover:to-rose-700 p-3 cursor-pointer rounded-full shadow-lg transform hover:scale-105 active:scale-95 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
             title="Generate thumbnail"
           >
@@ -268,7 +361,7 @@ export default function ThumbnailGeneratorPage() {
         <div className="flex flex-col sm:flex-row gap-4 justify-center">
           <label htmlFor="referenceimage" className="flex-1">
             {!referenceImagePreview ? (
-              <div className={`flex items-center justify-center gap-2 px-6 py-3 border-2 border-dashed border-pink-300 rounded-xl hover:border-pink-500 text-gray-700 w-full transition-all duration-200 hover:shadow-md hover:scale-[1.02] active:scale-100 cursor-pointer bg-white group relative overflow-hidden ${!isLoggedIn || loading ? 'opacity-50 cursor-not-allowed' : ''}`}>
+              <div className={`flex items-center justify-center gap-2 px-6 py-3 border-2 border-dashed border-pink-300 rounded-xl hover:border-pink-500 text-gray-700 w-full transition-all duration-200 hover:shadow-md hover:scale-[1.02] active:scale-100 cursor-pointer bg-white group relative overflow-hidden ${loading || balance < toolCost ? 'opacity-50 cursor-not-allowed' : ''}`}>
                 <div className="absolute inset-0 bg-gradient-to-r from-pink-100 to-rose-100 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
                 <div className="p-2 bg-pink-100 rounded-full group-hover:bg-pink-200 transition-colors z-10">
                   <ImagePlus className="w-5 h-5 text-pink-600" />
@@ -284,6 +377,8 @@ export default function ThumbnailGeneratorPage() {
                   className='absolute top-2 right-2 h-5 w-5 p-1 bg-red-500 text-white rounded-full cursor-pointer z-20 shadow-md hover:bg-red-600 transition-colors' 
                   onClick={(e) => {
                     e.preventDefault();
+                    e.stopPropagation();
+                    if (referenceImagePreview) URL.revokeObjectURL(referenceImagePreview);
                     setReferenceImagePreview(undefined);
                     setReferenceImage(null);
                   }}
@@ -302,12 +397,12 @@ export default function ThumbnailGeneratorPage() {
             id='referenceimage' 
             className='hidden' 
             onChange={(e) => handleFileChange('referenceimage', e)}
-            disabled={!isLoggedIn || loading}
+            disabled={loading || balance < toolCost}
           />
           
           <label htmlFor="includeface" className="flex-1">
             {!includeFacePreview ? (
-              <div className={`flex items-center justify-center gap-2 px-6 py-3 border-2 border-dashed border-pink-300 rounded-xl hover:border-pink-500 text-gray-700 w-full transition-all duration-200 hover:shadow-md hover:scale-[1.02] active:scale-100 cursor-pointer bg-white group relative overflow-hidden ${!isLoggedIn || loading ? 'opacity-50 cursor-not-allowed' : ''}`}>
+              <div className={`flex items-center justify-center gap-2 px-6 py-3 border-2 border-dashed border-pink-300 rounded-xl hover:border-pink-500 text-gray-700 w-full transition-all duration-200 hover:shadow-md hover:scale-[1.02] active:scale-100 cursor-pointer bg-white group relative overflow-hidden ${loading || balance < toolCost ? 'opacity-50 cursor-not-allowed' : ''}`}>
                 <div className="absolute inset-0 bg-gradient-to-r from-pink-100 to-rose-100 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
                 <div className="p-2 bg-pink-100 rounded-full group-hover:bg-pink-200 transition-colors z-10">
                   <User className="w-5 h-5 text-pink-600" />
@@ -323,6 +418,8 @@ export default function ThumbnailGeneratorPage() {
                   className='absolute top-2 right-2 h-5 w-5 p-1 bg-red-500 text-white rounded-full cursor-pointer z-20 shadow-md hover:bg-red-600 transition-colors' 
                   onClick={(e) => {
                     e.preventDefault();
+                    e.stopPropagation();
+                    if (includeFacePreview) URL.revokeObjectURL(includeFacePreview);
                     setIncludeFacePreview(undefined);
                     setIncludeFace(null);
                   }}
@@ -341,13 +438,21 @@ export default function ThumbnailGeneratorPage() {
             id='includeface' 
             className='hidden' 
             onChange={(e) => handleFileChange('includeimage', e)}
-            disabled={!isLoggedIn || loading}
+            disabled={loading || balance < toolCost}
           />
         </div>
 
-        {/* Clear Form Button */}
-        {(inputUser || referenceImagePreview || includeFacePreview) && (
-          <div className="flex justify-center mt-4">
+        {/* Credit Info and Clear Form */}
+        <div className="flex justify-between items-center mt-4">
+          <div className="text-sm text-gray-500">
+            <Coins className="h-4 w-4 inline mr-1 text-yellow-500" />
+            Balance: <span className="font-semibold">{balance}</span> credits
+            {balance < toolCost && (
+              <span className="ml-2 text-xs text-red-500">(Need {toolCost - balance} more)</span>
+            )}
+          </div>
+          
+          {(inputUser || referenceImagePreview || includeFacePreview) && (
             <button
               onClick={() => {
                 setInputUser('');
@@ -358,8 +463,8 @@ export default function ThumbnailGeneratorPage() {
             >
               Clear Form
             </button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
       
       <ThumbnailList refreshTrigger={refreshTrigger} />

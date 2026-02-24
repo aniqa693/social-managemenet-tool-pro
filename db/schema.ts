@@ -13,8 +13,9 @@ export const user = pgTable("user", {
     .$onUpdate(() => /* @__PURE__ */ new Date())
     .notNull(),
       credits: integer("credits").default(0),
+  role: text("role", { enum: ['admin', 'creator', 'analyst'] }).default("creator").notNull(),
 
-  role: text("role").default("creator"),
+ // role: text("role").default("creator"),
   // toolname:text("tname").default("no")
 });
 

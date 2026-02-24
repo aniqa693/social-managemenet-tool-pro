@@ -1,7 +1,9 @@
+// app/api/generate-script/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { db } from '../../../../db';
 import { videoScripts } from '../../../../db/schema';
+import { CreditManager } from '../../../../lib/credit-manager';
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
@@ -47,25 +49,61 @@ export async function POST(request: NextRequest) {
       includeHook,
       includeCTA,
       creativityLevel, 
-      userEmail: clientEmail,
-      userId: clientUserId
+      userEmail,
+      userId
     } = await request.json();
 
-    // For Better Auth, we'll trust the client-side session info
-    // In production, you should validate the session with Better Auth
-    const actualUserEmail = clientEmail;
-    const actualUserId = clientUserId;
-    
     console.log('🎬 Script generation for:', {
-      clientEmail,
-      clientUserId,
-      actualUserEmail
+      userEmail,
+      userId,
+      hasUser: !!userEmail && !!userId
     });
 
     if (!topic) {
       return NextResponse.json(
         { error: 'Topic is required' },
         { status: 400 }
+      );
+    }
+
+    // Ensure user is authenticated
+    if (!userId || !userEmail) {
+      return NextResponse.json(
+        { error: 'Authentication required' },
+        { status: 401 }
+      );
+    }
+
+    // CREDIT CHECK - Required for authenticated users
+    let requiredCredits = 3; // Default cost for script generator
+    
+    console.log('💰 Checking credits for user:', userId);
+    
+    try {
+      // Get tool cost
+      requiredCredits = await CreditManager.getToolCost('script_generator');
+      
+      // Check if user has sufficient credits
+      const creditCheck = await CreditManager.hasSufficientCredits(userId, 'script_generator');
+      
+      console.log('💰 Credit check result:', creditCheck);
+
+      if (!creditCheck.hasCredits) {
+        return NextResponse.json(
+          { 
+            error: 'Insufficient credits',
+            requiredCredits: creditCheck.requiredCredits,
+            currentCredits: creditCheck.currentCredits,
+            message: `You need ${creditCheck.requiredCredits} credits to generate a script. You have ${creditCheck.currentCredits} credits.`
+          },
+          { status: 403 }
+        );
+      }
+    } catch (creditError) {
+      console.error('❌ Credit check error:', creditError);
+      return NextResponse.json(
+        { error: 'Failed to verify credits. Please try again.' },
+        { status: 500 }
       );
     }
 
@@ -77,7 +115,7 @@ export async function POST(request: NextRequest) {
       includeHook,
       includeCTA,
       creativityLevel,
-      actualUserEmail
+      userEmail
     });
 
     const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
@@ -212,48 +250,68 @@ export async function POST(request: NextRequest) {
       }
     };
 
-    // Save to database if user is logged in
-    let savedRecord = null;
-    const isGuestUser = !actualUserEmail || 
-                       actualUserEmail === 'guest@example.com' || 
-                       actualUserEmail.includes('guest');
+    // DEDUCT CREDITS for authenticated user
+    let creditDeductionResult = null;
     
-    if (!isGuestUser && actualUserEmail) {
-      try {
-        savedRecord = await saveScriptToDatabase(
-          topic,
-          contentForDB,
-          videoType || 'youtube',
-          tone || 'engaging',
-          duration || 5,
-          actualUserEmail,
-          actualUserId
-        );
-        console.log('💾 Script saved to database with ID:', savedRecord?.id);
-      } catch (dbError) {
-        console.error('⚠️ Failed to save to database, but continuing with response:', dbError);
-      }
-    } else {
-      console.log('ℹ️ Guest user, skipping database save');
+    console.log('💰 Deducting credits for user:', userId);
+    
+    try {
+      creditDeductionResult = await CreditManager.useTool(
+        userId,
+        'script_generator',
+        `Generated ${generatedScript.sections?.length || 1}-section script for topic: ${topic}`,
+        { topic, videoType, duration }
+      );
+
+      console.log('💰 Credit deduction result:', creditDeductionResult);
+    } catch (deductionError) {
+      console.error('❌ Credit deduction error:', deductionError);
+      return NextResponse.json(
+        { error: 'Failed to process credits. Please try again.' },
+        { status: 500 }
+      );
     }
 
-    // Return response
+    // Save to database
+    let savedRecord = null;
+    
+    try {
+      savedRecord = await saveScriptToDatabase(
+        topic,
+        contentForDB,
+        videoType || 'youtube',
+        tone || 'engaging',
+        duration || 5,
+        userEmail,
+        userId
+      );
+      console.log('💾 Script saved to database with ID:', savedRecord?.id);
+    } catch (dbError) {
+      console.error('⚠️ Failed to save to database, but continuing with response:', dbError);
+    }
+
+    // Return response with credit info
     return NextResponse.json({
       success: true,
       script: generatedScript,
+      creditInfo: {
+        deducted: true,
+        amount: Math.abs(creditDeductionResult?.amount || requiredCredits),
+        remainingCredits: creditDeductionResult?.remainingCredits || 0,
+        transactionId: creditDeductionResult?.transactionId
+      },
       saveInfo: {
         saved: !!savedRecord,
         recordId: savedRecord?.id,
-        userEmail: actualUserEmail,
-        message: savedRecord ? 'Script saved to database' : 'Script not saved (guest user)'
+        userEmail: userEmail,
+        message: savedRecord ? 'Script saved to database' : 'Failed to save script'
       },
       metadata: {
         duration: duration || 5,
         videoType: videoType || 'youtube',
         tone: tone || 'engaging',
         generatedAt: new Date().toISOString(),
-        user: isGuestUser ? 'guest' : actualUserEmail,
-        userId: actualUserId
+        userId: userId
       }
     });
     

@@ -19,7 +19,8 @@ export class CreditManager {
   // Default tool pricing (fallback if not in DB)
   private static readonly DEFAULT_TOOL_PRICING: Record<string, number> = {
     'caption_generator': 2,
-    'image_generator': 10,
+    'title-generator': 3,
+  'script_generator':5,
     'video_editor': 25,
     'audio_transcriber': 5,
     'pdf_converter': 3,
@@ -274,4 +275,4 @@ export class CreditManager {
       .limit(limit)
       .offset(offset);
   }
-}
+} 

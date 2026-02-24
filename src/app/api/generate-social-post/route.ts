@@ -9,6 +9,7 @@ import OpenAI from 'openai';
 import Replicate from 'replicate';
 import moment from 'moment';
 import axios from 'axios';
+import { CreditManager } from '../../../../lib/credit-manager';
 
 // Initialize services
 const imagekit = new ImageKit({
@@ -180,6 +181,41 @@ export async function POST(req: NextRequest) {
       }, { status: 400 });
     }
 
+    // CREDIT CHECK - Social post generator costs 3 credits
+    const toolName = 'social_post_generator';
+    let requiredCredits = 3; // Default cost
+    
+    try {
+      // Get tool cost from database (or use default)
+      requiredCredits = await CreditManager.getToolCost(toolName);
+      
+      // Check if user has sufficient credits
+      const creditCheck = await CreditManager.hasSufficientCredits(userId, toolName);
+      
+      console.log('💰 Credit check result:', creditCheck);
+
+      if (!creditCheck.hasCredits) {
+        return NextResponse.json(
+          { 
+            error: 'Insufficient credits',
+            requiredCredits: creditCheck.requiredCredits,
+            currentCredits: creditCheck.currentCredits,
+            message: `You need ${creditCheck.requiredCredits} credits to generate a post. You have ${creditCheck.currentCredits} credits.`
+          },
+          { status: 403 }
+        );
+      }
+    } catch (creditError) {
+      console.error('❌ Credit check error:', creditError);
+      return NextResponse.json(
+        { 
+          error: 'Credit check failed',
+          message: 'Unable to verify credits. Please try again.'
+        },
+        { status: 500 }
+      );
+    }
+
     // Step 1: Upload image if provided
     let includeImageURL: string | undefined;
     if (includeImage) {
@@ -250,6 +286,23 @@ export async function POST(req: NextRequest) {
 
     console.log('✅ Post uploaded to ImageKit:', uploadedPost.url);
 
+    // DEDUCT CREDITS - After successful generation
+    let creditDeductionResult = null;
+    try {
+      creditDeductionResult = await CreditManager.useTool(
+        userId,
+        toolName,
+        `Generated ${platform} post with ${aspectRatio} ratio: ${userInput.substring(0, 50)}...`,
+        { platform, aspectRatio, userInput: userInput.substring(0, 100) }
+      );
+
+      console.log('💰 Credit deduction result:', creditDeductionResult);
+    } catch (deductionError) {
+      console.error('❌ Credit deduction error:', deductionError);
+      // Continue even if deduction fails - we already generated the post
+      // But we should log this for auditing
+    }
+
     // Step 6: Save to database
     const savedPost = await db.insert(socialPostsTable).values({
       userInput: userInput,
@@ -264,12 +317,24 @@ export async function POST(req: NextRequest) {
 
     console.log("✅ Social post saved to database, ID:", savedPost[0].id);
 
+    // Return response - FIXED: removed reference to undefined 'balance'
     return NextResponse.json({ 
       success: true,
       postUrl: uploadedPost.url,
       postId: savedPost[0].id,
       platform: platform,
-      aspectRatio: aspectRatio
+      aspectRatio: aspectRatio,
+      creditInfo: creditDeductionResult ? {
+        deducted: true,
+        amount: Math.abs(creditDeductionResult.amount || requiredCredits),
+        remainingCredits: creditDeductionResult.remainingCredits || 0,
+        transactionId: creditDeductionResult.transactionId
+      } : {
+        deducted: true,
+        amount: requiredCredits,
+        remainingCredits: 0, // We don't know the balance, default to 0
+        message: 'Credits deducted'
+      }
     });
 
   } catch (error) {

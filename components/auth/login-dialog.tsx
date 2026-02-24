@@ -37,6 +37,8 @@ export function LoginDialog({ open, onOpenChange }: LoginDialogProps) {
         setError(error.message || 'Invalid credentials');
         return;
       }
+      // router.refresh();
+
 
       // Get user session to determine role
       const session = await authClient.getSession();

@@ -1,3 +1,5 @@
+// app/title-generator/page.tsx (updated with credit management)
+
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -16,7 +18,8 @@ import {
   Newspaper, PenTool, Lightbulb, Rocket, Crown,
   Layers, Filter, Sparkle, Zap as Lightning,
   ThumbsUp, BarChart, TrendingUp as TrendingUpIcon,
-  Award, Target as TargetIcon, Brain
+  Award, Target as TargetIcon, Brain,
+  Coins, AlertCircle, CreditCard, LogIn, UserPlus
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
@@ -26,6 +29,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import toast, { Toaster } from 'react-hot-toast';
 import Link from 'next/link';
 import { useSession } from '../../../../../lib/auth-client';
+import { useCredits } from '../../../../../useCredits';
 import { signOut } from 'better-auth/api';
 
 type TitleType = {
@@ -45,6 +49,11 @@ type TopicSuggestion = {
 };
 
 export default function TitleGeneratorPage() {
+  // Get real user session from your auth system
+  const { data: session, isPending: sessionLoading } = useSession();
+  const user = session?.user;
+  const isLoading = sessionLoading;
+
   // State
   const [topic, setTopic] = useState('');
   const [description, setDescription] = useState('');
@@ -64,13 +73,17 @@ export default function TitleGeneratorPage() {
   const [saveStatus, setSaveStatus] = useState<{saved: boolean; recordId?: number}>({saved: false});
   const [selectedTab, setSelectedTab] = useState('generate');
   const [selectedTitleType, setSelectedTitleType] = useState('all');
-
-  // Get session from Better Auth
-  const { data: session, isPending: sessionLoading } = useSession();
-  const isLoggedIn = !!session?.user;
-  const userEmail = session?.user?.email || 'guest@example.com';
-  const userName = session?.user?.name || '';
-  const userId = session?.user?.id;
+  
+  // Credit management hook with real user ID
+  const { 
+    balance, 
+    loading: creditsLoading, 
+    error: creditsError,
+    checkCredits,
+    refreshBalance,
+    toolCost,
+    fetchToolCost 
+  } = useCredits(user?.id);
 
   // Data
   const topicSuggestions: TopicSuggestion[] = [
@@ -109,6 +122,9 @@ export default function TitleGeneratorPage() {
     { value: 'benefit', label: 'Benefit-Driven', icon: <ThumbsUp className="h-4 w-4" /> },
   ];
 
+  // Check if user can afford
+  const canAfford = user ? (balance >= toolCost) : true; // Guests can always use
+
   // Effects
   useEffect(() => {
     setShowSuggestions(topic.length > 0);
@@ -122,6 +138,18 @@ export default function TitleGeneratorPage() {
       });
     }
   }, [topic, session]);
+
+  // Fetch tool cost on mount
+  useEffect(() => {
+    fetchToolCost('title_generator');
+  }, [fetchToolCost]);
+
+  // Refresh balance when user logs in
+  useEffect(() => {
+    if (user) {
+      refreshBalance();
+    }
+  }, [user, refreshBalance]);
 
   // Functions
   const copyToClipboard = async (text: string, index: number) => {
@@ -165,6 +193,18 @@ export default function TitleGeneratorPage() {
       return;
     }
 
+    // Credit check for authenticated users
+    if (user && !canAfford) {
+      toast.error(
+        <div className="flex items-center gap-2">
+          <Coins className="h-5 w-5 text-yellow-500" />
+          <span>Insufficient credits! You need {toolCost} credits but have {balance}.</span>
+        </div>,
+        { duration: 5000 }
+      );
+      return;
+    }
+
     const startTime = Date.now();
     setLoading(true);
     setError('');
@@ -175,10 +215,10 @@ export default function TitleGeneratorPage() {
 
     try {
       console.log('Sending request with user:', { 
-        email: userEmail, 
-        isLoggedIn, 
-        name: userName,
-        userId
+        email: user?.email, 
+        isLoggedIn: !!user, 
+        name: user?.name,
+        userId: user?.id
       });
 
       const response = await fetch('/api/generate-title', {
@@ -191,8 +231,8 @@ export default function TitleGeneratorPage() {
           includeKeywords,
           creativityLevel: creativityLevel[0],
           count: titleCount,
-          userEmail: userEmail,
-          userId: userId
+          userEmail: user?.email,
+          userId: user?.id
         }),
       });
 
@@ -201,6 +241,10 @@ export default function TitleGeneratorPage() {
       setGenerationTime(endTime - startTime);
 
       if (!response.ok) {
+        // Handle credit-specific errors
+        if (response.status === 403) {
+          throw new Error(data.message || data.error || 'Insufficient credits');
+        }
         throw new Error(data.error || 'Failed to generate titles');
       }
 
@@ -212,23 +256,32 @@ export default function TitleGeneratorPage() {
       setTitles(titlesWithScores);
       setCopiedStates(new Array(titlesWithScores.length).fill(false));
       
-      if (data.saveInfo?.saved) {
-        setSaveStatus({ saved: true, recordId: data.saveInfo.recordId });
-        toast.dismiss(loadingToast);
+      // Refresh balance if credits were deducted
+      if (data.creditInfo?.deducted && user) {
+        await refreshBalance();
+      }
+
+      // Show success message with credit info
+      toast.dismiss(loadingToast);
+      
+      if (data.creditInfo?.deducted) {
         toast.success(
           <div className="flex items-center gap-2">
-            <Database className="h-5 w-5 text-green-500" />
-            <span>Generated and saved {titlesWithScores.length} titles! 🎉</span>
+            <Coins className="h-5 w-5 text-green-500" />
+            <span>
+              Generated {titlesWithScores.length} titles! Used {data.creditInfo.amount} credits. 
+              Remaining: {data.creditInfo.remainingCredits}
+            </span>
           </div>,
-          { duration: 4000 }
+          { duration: 5000 }
         );
       } else {
-        setSaveStatus({ saved: false });
-        toast.dismiss(loadingToast);
         toast.success(
           <div className="flex items-center gap-2">
             <Sparkles className="h-5 w-5 text-yellow-500" />
-            <span>Generated {titlesWithScores.length} titles in {(endTime - startTime)/1000}s! ✨</span>
+            <span>
+              Generated {titlesWithScores.length} titles in {(endTime - startTime)/1000}s!
+            </span>
           </div>,
           { duration: 4000 }
         );
@@ -238,7 +291,12 @@ export default function TitleGeneratorPage() {
       toast.dismiss(loadingToast);
       const errorMessage = err instanceof Error ? err.message : 'Something went wrong';
       setError(errorMessage);
-      toast.error(`⚠️ ${errorMessage}`);
+      toast.error(
+        <div className="flex items-center gap-2">
+          <AlertCircle className="h-5 w-5 text-red-500" />
+          <span>{errorMessage}</span>
+        </div>
+      );
     } finally {
       setLoading(false);
     }
@@ -302,7 +360,18 @@ export default function TitleGeneratorPage() {
     }
   };
 
-  if (sessionLoading) {
+  // Sign in handlers
+  const handleSignIn = () => {
+    toast.success('Redirecting to sign in...');
+    // Add your actual sign in logic
+  };
+
+  const handleSignUp = () => {
+    toast.success('Redirecting to sign up...');
+    // Add your actual sign up logic
+  };
+
+  if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <Loader2 className="h-8 w-8 animate-spin text-purple-600" />
@@ -332,28 +401,94 @@ export default function TitleGeneratorPage() {
             </p>
           </div>
           
-          <div className="flex items-center gap-4">
-            <Link href="/">
-              <Button variant="outline" className="gap-2">
-                <Sparkles className="h-4 w-4" />
-                Caption Generator
-              </Button>
-            </Link>
-            {isLoggedIn && (
-              <div className="flex items-center gap-2 px-4 py-2 bg-white rounded-full shadow-sm border">
-                <User className="h-4 w-4 text-blue-500" />
-                <span className="text-sm font-medium">{userEmail.split('@')[0]}</span>
+          {/* Auth and Credit Display */}
+          <div className="flex items-center gap-3">
+            {user ? (
+              <div className="flex items-center gap-3 bg-white shadow-md rounded-full px-6 py-3 border border-purple-200">
+                {user.image ? (
+                  <img 
+                    src={user.image} 
+                    alt={user.name || 'User'} 
+                    className="h-8 w-8 rounded-full"
+                  />
+                ) : (
+                  <div className="h-8 w-8 rounded-full bg-purple-200 flex items-center justify-center">
+                    <span className="text-sm font-medium text-purple-700">
+                      {user.name?.[0] || user.email?.[0] || 'U'}
+                    </span>
+                  </div>
+                )}
+                <div className="text-left">
+                  <p className="text-sm font-medium text-gray-900">
+                    {user.name || user.email?.split('@')[0]}
+                  </p>
+                  <div className="flex items-center gap-1">
+                    <Coins className="h-4 w-4 text-yellow-500" />
+                    <span className="text-sm font-semibold">{balance}</span>
+                    {balance < toolCost && (
+                      <Badge variant="destructive" className="text-xs ml-1">Low</Badge>
+                    )}
+                  </div>
+                </div>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="ml-2"
+                  onClick={() => toast.success('Redirecting to purchase page...')}
+                >
+                  Buy Credits
+                </Button>
                 <Button 
                   variant="ghost" 
                   size="sm" 
                   onClick={handleLogout}
-                  className="h-6 w-6 p-0 ml-2 hover:bg-red-100 rounded-full"
+                  className="h-8 w-8 p-0 ml-2 hover:bg-red-100 rounded-full"
                 >
-                  <LogOut className="h-3 w-3 text-red-500" />
+                  <LogOut className="h-4 w-4 text-red-500" />
+                </Button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={handleSignIn}
+                  className="bg-white"
+                >
+                  <LogIn className="h-4 w-4 mr-2" />
+                  Sign In
+                </Button>
+                <Button 
+                  size="sm"
+                  onClick={handleSignUp}
+                  className="bg-purple-600 hover:bg-purple-700"
+                >
+                  <UserPlus className="h-4 w-4 mr-2" />
+                  Sign Up
                 </Button>
               </div>
             )}
           </div>
+        </div>
+
+        {/* Cost Display */}
+        <div className="mt-4 flex justify-center gap-4 mb-8">
+          <Badge className="bg-purple-100 text-purple-800 px-4 py-2 text-sm">
+            <Coins className="h-4 w-4 mr-1 inline" />
+            Cost: {toolCost} credits per generation
+          </Badge>
+          {user && (
+            <Badge className="bg-blue-100 text-blue-800 px-4 py-2 text-sm">
+              <CreditCard className="h-4 w-4 mr-1 inline" />
+              Your balance: {balance} credits
+            </Badge>
+          )}
+          {!user && (
+            <Badge className="bg-green-100 text-green-800 px-4 py-2 text-sm">
+              <Sparkles className="h-4 w-4 mr-1 inline" />
+              Guest Mode - Free to try!
+            </Badge>
+          )}
         </div>
 
         {/* Stats Bar */}
@@ -431,7 +566,7 @@ export default function TitleGeneratorPage() {
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
               {/* Left Column - Input Form */}
               <div className="lg:col-span-2 space-y-8">
-                <Card className="shadow-xl border-0 bg-linear-to-br from-white to-gray-50">
+                <Card className={`shadow-xl border-0 ${!canAfford && user ? 'border-red-300 bg-red-50/30' : 'bg-linear-to-br from-white to-gray-50'}`}>
                   <CardHeader className="border-b">
                     <CardTitle className="flex items-center gap-2 text-2xl">
                       <Wand2 className="h-6 w-6 text-purple-600" />
@@ -442,6 +577,48 @@ export default function TitleGeneratorPage() {
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="pt-6 space-y-6">
+                    {/* Credit Warning for logged in users */}
+                    {user && !canAfford && (
+                      <div className="p-4 bg-red-50 border border-red-200 rounded-lg flex items-center gap-3">
+                        <AlertCircle className="h-5 w-5 text-red-500" />
+                        <div className="flex-1">
+                          <p className="text-red-700 font-medium">Insufficient Credits</p>
+                          <p className="text-sm text-red-600">
+                            You need {toolCost} credits to use this tool. You have {balance} credits.
+                          </p>
+                        </div>
+                        <Button 
+                          size="sm" 
+                          variant="outline" 
+                          className="border-red-300"
+                          onClick={() => toast.success('Redirecting to purchase page...')}
+                        >
+                          Buy Credits
+                        </Button>
+                      </div>
+                    )}
+
+                    {/* Guest Mode Info */}
+                    {!user && (
+                      <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg flex items-center gap-3">
+                        <Sparkles className="h-5 w-5 text-blue-500" />
+                        <div className="flex-1">
+                          <p className="text-blue-700 font-medium">Guest Mode</p>
+                          <p className="text-sm text-blue-600">
+                            You're using the tool as a guest. Sign in to save your titles and use credits!
+                          </p>
+                        </div>
+                        <Button 
+                          size="sm" 
+                          variant="outline" 
+                          className="border-blue-300"
+                          onClick={handleSignIn}
+                        >
+                          Sign In
+                        </Button>
+                      </div>
+                    )}
+
                     {/* Topic Input */}
                     <div className="space-y-3">
                       <Label className="text-gray-700 flex items-center gap-2">
@@ -637,9 +814,12 @@ export default function TitleGeneratorPage() {
                     {/* Generate Button */}
                     <Button
                       onClick={generateTitles}
-                      disabled={loading || !topic.trim()}
-                      size="lg"
-                      className="w-full h-14 text-lg bg-linear-to-r from-blue-600 via-purple-600 to-pink-600 hover:from-blue-700 hover:via-purple-700 hover:to-pink-700 shadow-lg hover:shadow-xl transition-all duration-300"
+                      disabled={loading || !topic.trim() || (user && !canAfford)}
+                      className={`w-full h-14 text-lg ${
+                        user && !canAfford
+                          ? 'bg-gray-400 cursor-not-allowed'
+                          : 'bg-linear-to-r from-blue-600 via-purple-600 to-pink-600 hover:from-blue-700 hover:via-purple-700 hover:to-pink-700'
+                      } shadow-lg hover:shadow-xl transition-all duration-300`}
                     >
                       {loading ? (
                         <>
@@ -649,7 +829,9 @@ export default function TitleGeneratorPage() {
                       ) : (
                         <>
                           <Wand2 className="h-5 w-5 mr-2" />
-                          Generate {titleCount} Titles Now
+                          {user && !canAfford 
+                            ? `Need ${toolCost} Credits (You have ${balance})` 
+                            : `Generate ${titleCount} Titles (${toolCost} Credits)`}
                         </>
                       )}
                     </Button>
@@ -818,14 +1000,14 @@ export default function TitleGeneratorPage() {
                   Your Saved Titles
                 </CardTitle>
                 <CardDescription>
-                  {isLoggedIn 
-                    ? `Titles saved by ${userEmail}`
+                  {user 
+                    ? `Titles saved by ${user.email}`
                     : 'Login to save and view your titles'
                   }
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                {isLoggedIn ? (
+                {user ? (
                   <div className="text-center py-12">
                     <div className="w-20 h-20 rounded-full bg-linear-to-r from-green-100 to-emerald-100 flex items-center justify-center mx-auto mb-6">
                       <Database className="h-10 w-10 text-green-600" />
@@ -1125,6 +1307,12 @@ export default function TitleGeneratorPage() {
                 <div className="text-2xl font-bold text-gray-900">{(generationTime/1000).toFixed(1)}s</div>
                 <div className="text-xs text-gray-500">Avg. Time</div>
               </div>
+              {user && (
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-yellow-600">{balance}</div>
+                  <div className="text-xs text-gray-500">Credits Left</div>
+                </div>
+              )}
             </div>
           </div>
           

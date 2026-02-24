@@ -1,4 +1,4 @@
-//api/generate-yhumbnail
+// app/api/generate-thumbnail/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '../../../../db';
 import { thumbnailsTable } from '../../../../db/schema';
@@ -9,6 +9,7 @@ import OpenAI from 'openai';
 import Replicate from 'replicate';
 import moment from 'moment';
 import axios from 'axios';
+import { CreditManager } from '../../../../lib/credit-manager';
 
 // Initialize services
 const imagekit = new ImageKit({
@@ -156,6 +157,41 @@ export async function POST(req: NextRequest) {
       }, { status: 400 });
     }
 
+    // CREDIT CHECK - Thumbnail generator costs 3 credits
+    const toolName = 'thumbnail_generator';
+    let requiredCredits = 3; // Default cost
+    
+    try {
+      // Get tool cost from database (or use default)
+      requiredCredits = await CreditManager.getToolCost(toolName);
+      
+      // Check if user has sufficient credits
+      const creditCheck = await CreditManager.hasSufficientCredits(userId, toolName);
+      
+      console.log('💰 Credit check result:', creditCheck);
+
+      if (!creditCheck.hasCredits) {
+        return NextResponse.json(
+          { 
+            error: 'Insufficient credits',
+            requiredCredits: creditCheck.requiredCredits,
+            currentCredits: creditCheck.currentCredits,
+            message: `You need ${creditCheck.requiredCredits} credits to generate a thumbnail. You have ${creditCheck.currentCredits} credits.`
+          },
+          { status: 403 }
+        );
+      }
+    } catch (creditError) {
+      console.error('❌ Credit check error:', creditError);
+      return NextResponse.json(
+        { 
+          error: 'Credit check failed',
+          message: 'Unable to verify credits. Please try again.'
+        },
+        { status: 500 }
+      );
+    }
+
     // Step 1: Upload reference images if provided
     const uploads: { referenceImageURL?: string; includeFaceURL?: string } = {};
 
@@ -233,6 +269,22 @@ export async function POST(req: NextRequest) {
 
     console.log('✅ Thumbnail uploaded to ImageKit:', uploadedThumbnail.url);
 
+    // DEDUCT CREDITS - After successful generation
+    let creditDeductionResult = null;
+    try {
+      creditDeductionResult = await CreditManager.useTool(
+        userId,
+        toolName,
+        `Generated thumbnail for: ${userinput || 'video content'}`,
+        { hasReference: !!referenceImage, hasFace: !!includeFace }
+      );
+
+      console.log('💰 Credit deduction result:', creditDeductionResult);
+    } catch (deductionError) {
+      console.error('❌ Credit deduction error:', deductionError);
+      // Continue even if deduction fails - we already generated the thumbnail
+    }
+
     // Step 6: Save to database
     const savedThumbnail = await db.insert(thumbnailsTable).values({
       userInput: userinput || 'AI generated thumbnail',
@@ -246,10 +298,22 @@ export async function POST(req: NextRequest) {
 
     console.log("✅ Thumbnail saved to database, ID:", savedThumbnail[0].id);
 
+    // Return response - FIXED: removed reference to undefined 'balance'
     return NextResponse.json({ 
       success: true,
       thumbnailUrl: uploadedThumbnail.url,
-      thumbnailId: savedThumbnail[0].id
+      thumbnailId: savedThumbnail[0].id,
+      creditInfo: creditDeductionResult ? {
+        deducted: true,
+        amount: Math.abs(creditDeductionResult.amount || requiredCredits),
+        remainingCredits: creditDeductionResult.remainingCredits || 0,
+        transactionId: creditDeductionResult.transactionId
+      } : {
+        deducted: true,
+        amount: requiredCredits,
+        remainingCredits: 0, // We don't know the balance, default to 0
+        message: 'Credits deducted'
+      }
     });
 
   } catch (error) {

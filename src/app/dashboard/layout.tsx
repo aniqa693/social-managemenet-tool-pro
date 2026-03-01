@@ -100,7 +100,8 @@ export default function DashboardLayout({
 }) {
   return (
     <RoleSwitchProvider>
-      <DashboardContent>{children}</DashboardContent>
+      <DashboardContent>
+        {children}</DashboardContent>
     </RoleSwitchProvider>
   );
 }

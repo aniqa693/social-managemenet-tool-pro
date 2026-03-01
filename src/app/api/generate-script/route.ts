@@ -1,11 +1,42 @@
-// app/api/generate-script/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { db } from '../../../../db';
 import { videoScripts } from '../../../../db/schema';
 import { CreditManager } from '../../../../lib/credit-manager';
+import { eq, and } from 'drizzle-orm';
+import { userToolPermissions, toolPricingTable } from '../../../../db/schema';
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+
+// NEW: Helper function to check if tool is enabled for user
+async function isToolEnabledForUser(userId: string, toolName: string): Promise<boolean> {
+  try {
+    // First check if there's a custom permission for this user
+    const userPermission = await db.query.userToolPermissions.findFirst({
+      where: and(
+        eq(userToolPermissions.userId, userId),
+        eq(userToolPermissions.toolName, toolName)
+      )
+    });
+
+    // If custom permission exists, use that
+    if (userPermission) {
+      return userPermission.isEnabled;
+    }
+
+    // Otherwise check global tool setting
+    const toolSetting = await db.query.toolPricingTable.findFirst({
+      where: eq(toolPricingTable.tool_name, toolName)
+    });
+
+    // Default to true if no setting found (for backward compatibility)
+    return toolSetting?.enable_disenable ?? true;
+    
+  } catch (error) {
+    console.error('Error checking tool enabled status:', error);
+    return true; // Default to enabled on error
+  }
+}
 
 // Helper function to save script to database
 async function saveScriptToDatabase(
@@ -58,6 +89,22 @@ export async function POST(request: NextRequest) {
       userId,
       hasUser: !!userEmail && !!userId
     });
+
+    // NEW: Check if tool is enabled for this user (skip for guests)
+    if (userId) {
+      const toolEnabled = await isToolEnabledForUser(userId, 'script_generator');
+      
+      if (!toolEnabled) {
+        console.log('🚫 Tool is disabled for user:', userId);
+        return NextResponse.json(
+          { 
+            error: 'tool_disabled',
+            message: 'This tool has been disabled by the administrator. Please contact support for assistance.'
+          },
+          { status: 403 }
+        );
+      }
+    }
 
     if (!topic) {
       return NextResponse.json(

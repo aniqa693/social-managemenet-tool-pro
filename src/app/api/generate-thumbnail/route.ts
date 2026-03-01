@@ -1,8 +1,7 @@
-// app/api/generate-thumbnail/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '../../../../db';
 import { thumbnailsTable } from '../../../../db/schema';
-import { desc, eq } from 'drizzle-orm';
+import { desc, eq, and } from 'drizzle-orm';
 import { getServerSession } from '../../../../lib/auth-server';
 import ImageKit from 'imagekit';
 import OpenAI from 'openai';
@@ -10,6 +9,7 @@ import Replicate from 'replicate';
 import moment from 'moment';
 import axios from 'axios';
 import { CreditManager } from '../../../../lib/credit-manager';
+import { userToolPermissions, toolPricingTable } from '../../../../db/schema';
 
 // Initialize services
 const imagekit = new ImageKit({
@@ -26,6 +26,36 @@ const openai = new OpenAI({
 const replicate = new Replicate({
   auth: process.env.REPLICATE_API_KEY,
 });
+
+// NEW: Helper function to check if tool is enabled for user
+async function isToolEnabledForUser(userId: string, toolName: string): Promise<boolean> {
+  try {
+    // First check if there's a custom permission for this user
+    const userPermission = await db.query.userToolPermissions.findFirst({
+      where: and(
+        eq(userToolPermissions.userId, userId),
+        eq(userToolPermissions.toolName, toolName)
+      )
+    });
+
+    // If custom permission exists, use that
+    if (userPermission) {
+      return userPermission.isEnabled;
+    }
+
+    // Otherwise check global tool setting
+    const toolSetting = await db.query.toolPricingTable.findFirst({
+      where: eq(toolPricingTable.tool_name, toolName)
+    });
+
+    // Default to true if no setting found (for backward compatibility)
+    return toolSetting?.enable_disenable ?? true;
+    
+  } catch (error) {
+    console.error('Error checking tool enabled status:', error);
+    return true; // Default to enabled on error
+  }
+}
 
 // Helper function to get file buffer
 const getFileBufferData = async (file: File) => {
@@ -143,6 +173,20 @@ export async function POST(req: NextRequest) {
     
     const email = session.user.email;
     const userId = session.user.id;
+
+    // NEW: Check if tool is enabled for this user
+    const toolEnabled = await isToolEnabledForUser(userId, 'thumbnail_generator');
+    
+    if (!toolEnabled) {
+      console.log('🚫 Tool is disabled for user:', userId);
+      return NextResponse.json(
+        { 
+          error: 'tool_disabled',
+          message: 'This tool has been disabled by the administrator. Please contact support for assistance.'
+        },
+        { status: 403 }
+      );
+    }
 
     const formData = await req.formData();
     const userinput = formData.get('description') as string;
@@ -298,7 +342,7 @@ export async function POST(req: NextRequest) {
 
     console.log("✅ Thumbnail saved to database, ID:", savedThumbnail[0].id);
 
-    // Return response - FIXED: removed reference to undefined 'balance'
+    // Return response
     return NextResponse.json({ 
       success: true,
       thumbnailUrl: uploadedThumbnail.url,

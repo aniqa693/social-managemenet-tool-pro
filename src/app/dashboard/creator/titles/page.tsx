@@ -1,4 +1,4 @@
-// app/title-generator/page.tsx (updated with platform-specific titles)
+// app/title-generator/page.tsx (updated with enable/disable functionality)
 
 'use client';
 
@@ -21,7 +21,7 @@ import {
   Award, Target as TargetIcon, Brain,
   Coins, AlertCircle, CreditCard, LogIn, UserPlus,
   Instagram, Video, Music, Facebook,
-  Info
+  Info, PowerOff, Power
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
@@ -71,6 +71,11 @@ export default function TitleGeneratorPage() {
   const [selectedTab, setSelectedTab] = useState('generate');
   const [titleStyle, setTitleStyle] = useState('catchy');
   
+  // NEW: Tool enabled/disabled state
+  const [toolEnabled, setToolEnabled] = useState<boolean>(true);
+  const [checkingToolStatus, setCheckingToolStatus] = useState<boolean>(true);
+  const [toolDetails, setToolDetails] = useState<any>(null);
+  
   // Credit management hook with real user ID
   const { 
     balance, 
@@ -88,7 +93,6 @@ export default function TitleGeneratorPage() {
     { value: 'facebook', label: 'Facebook', icon: <Facebook className="h-4 w-4" />, color: 'bg-gradient-to-r from-blue-500 to-indigo-500', maxChars: 80 },
     { value: 'youtube', label: 'YouTube', icon: <Youtube className="h-4 w-4" />, color: 'bg-gradient-to-r from-red-500 to-rose-500', maxChars: 70 },
     { value: 'tiktok', label: 'TikTok', icon: <Music className="h-4 w-4" />, color: 'bg-gradient-to-r from-teal-500 to-cyan-500', maxChars: 50 },
-    // { value: 'linkedin', label: 'LinkedIn', icon: <Briefcase className="h-4 w-4" />, color: 'bg-gradient-to-r from-blue-600 to-sky-600', maxChars: 70 },
     { value: 'twitter', label: 'Twitter/X', icon: <MessageSquare className="h-4 w-4" />, color: 'bg-gradient-to-r from-slate-600 to-gray-600', maxChars: 50 },
   ];
 
@@ -109,6 +113,45 @@ export default function TitleGeneratorPage() {
     { value: 'Money Saving Tips', category: 'Finance', icon: <Coins className="h-4 w-4" />, color: 'bg-gradient-to-r from-yellow-500 to-amber-500' },
     { value: 'Productivity Hacks', category: 'Self-Improvement', icon: <Rocket className="h-4 w-4" />, color: 'bg-gradient-to-r from-purple-500 to-pink-500' },
   ];
+
+  // NEW: Check if tool is enabled for this user
+  useEffect(() => {
+    const checkToolStatus = async () => {
+      if (!user?.id) {
+        setCheckingToolStatus(false);
+        setToolEnabled(true); // Default to enabled for guests
+        return;
+      }
+
+      try {
+        setCheckingToolStatus(true);
+        console.log('🔍 Checking tool status for user:', user.id, 'tool: title_generator');
+        
+        const response = await fetch(`/api/tools/status?userId=${user.id}&toolName=title_generator`);
+        const data = await response.json();
+
+        if (response.ok) {
+          setToolEnabled(data.enabled);
+          setToolDetails(data);
+          console.log('✅ Tool status:', { enabled: data.enabled, source: data.source });
+          
+          if (!data.enabled) {
+            console.log('⚠️ Title generator is disabled for this user');
+          }
+        } else {
+          console.error('Failed to check tool status:', data.error);
+          setToolEnabled(true); // Default to enabled on error
+        }
+      } catch (error) {
+        console.error('Error checking tool status:', error);
+        setToolEnabled(true); // Default to enabled on error
+      } finally {
+        setCheckingToolStatus(false);
+      }
+    };
+
+    checkToolStatus();
+  }, [user]);
 
   // Check if user can afford
   const canAfford = user ? (balance >= toolCost) : true;
@@ -138,6 +181,12 @@ export default function TitleGeneratorPage() {
 
   // Functions
   const copyToClipboard = async (text: string, index: number) => {
+    // NEW: Check if tool is disabled
+    if (!toolEnabled && user) {
+      toast.error('Tool is disabled by administrator');
+      return;
+    }
+    
     try {
       await navigator.clipboard.writeText(text);
       const newCopiedStates = [...copiedStates];
@@ -155,6 +204,12 @@ export default function TitleGeneratorPage() {
   };
 
   const copyAllTitles = () => {
+    // NEW: Check if tool is disabled
+    if (!toolEnabled && user) {
+      toast.error('Tool is disabled by administrator');
+      return;
+    }
+    
     const allText = titles.map((title, idx) => 
       `[${title.platform.toUpperCase()}] ${title.title}`
     ).join('\n\n');
@@ -163,6 +218,12 @@ export default function TitleGeneratorPage() {
   };
 
   const toggleLike = (index: number) => {
+    // NEW: Check if tool is disabled
+    if (!toolEnabled && user) {
+      toast.error('Tool is disabled by administrator');
+      return;
+    }
+    
     if (likedTitles.includes(index)) {
       setLikedTitles(likedTitles.filter(i => i !== index));
       toast('Removed from favorites', { icon: '💔' });
@@ -173,6 +234,12 @@ export default function TitleGeneratorPage() {
   };
 
   const togglePlatform = (platform: string) => {
+    // NEW: Check if tool is disabled
+    if (!toolEnabled && user) {
+      toast.error('Tool is disabled by administrator');
+      return;
+    }
+    
     setSelectedPlatforms(prev => 
       prev.includes(platform) 
         ? prev.filter(p => p !== platform)
@@ -181,6 +248,18 @@ export default function TitleGeneratorPage() {
   };
 
   const generateTitles = async () => {
+    // NEW: Check if tool is disabled by admin
+    if (!toolEnabled && user) {
+      toast.error(
+        <div className="flex items-center gap-2">
+          <PowerOff className="h-5 w-5 text-red-500" />
+          <span>This tool has been disabled by the administrator. Please contact support for assistance.</span>
+        </div>,
+        { duration: 5000 }
+      );
+      return;
+    }
+
     if (!topic.trim()) {
       toast.error('Please enter a topic');
       return;
@@ -230,6 +309,11 @@ export default function TitleGeneratorPage() {
 
       if (!response.ok) {
         if (response.status === 403) {
+          if (data.error?.includes('disabled')) {
+            // Tool disabled error
+            setToolEnabled(false);
+            throw new Error('This tool has been disabled by the administrator');
+          }
           throw new Error(data.message || data.error || 'Insufficient credits');
         }
         throw new Error(data.error || 'Failed to generate titles');
@@ -288,12 +372,24 @@ export default function TitleGeneratorPage() {
   };
 
   const useSuggestion = (suggestion: string) => {
+    // NEW: Check if tool is disabled
+    if (!toolEnabled && user) {
+      toast.error('Tool is disabled by administrator');
+      return;
+    }
+    
     setTopic(suggestion);
     setShowSuggestions(false);
     toast.success(`Using: ${suggestion}`, { icon: '🎯' });
   };
 
   const downloadTitles = () => {
+    // NEW: Check if tool is disabled
+    if (!toolEnabled && user) {
+      toast.error('Tool is disabled by administrator');
+      return;
+    }
+    
     const content = titles.map((title, idx) => 
       `[${title.platform.toUpperCase()}] ${title.title}`
     ).join('\n');
@@ -328,10 +424,13 @@ export default function TitleGeneratorPage() {
     toast.success('Redirecting to sign up...');
   };
 
-  if (isLoading) {
+  if (isLoading || checkingToolStatus) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-purple-600" />
+        <div className="text-center">
+          <Loader2 className="h-12 w-12 animate-spin text-purple-600 mx-auto" />
+          <p className="mt-4 text-gray-600">Loading...</p>
+        </div>
       </div>
     );
   }
@@ -365,6 +464,14 @@ export default function TitleGeneratorPage() {
           
           {/* Auth and Credit Display */}
           <div className="flex items-center gap-3">
+            {/* Tool Status Indicator */}
+            {user && !toolEnabled && (
+              <div className="flex items-center gap-2 bg-red-100 text-red-700 px-4 py-2 rounded-full border border-red-300">
+                <PowerOff className="h-4 w-4" />
+                <span className="text-sm font-medium">Tool Disabled</span>
+              </div>
+            )}
+            
             {user ? (
               <div className="flex items-center gap-3 bg-white shadow-md rounded-full px-6 py-3 border border-purple-200">
                 {user.image ? (
@@ -439,6 +546,24 @@ export default function TitleGeneratorPage() {
             <Coins className="h-4 w-4 mr-1 inline" />
             Cost: {toolCost} credits per generation
           </Badge>
+          
+          {/* Tool Status Badge for logged in users */}
+          {user && (
+            <Badge className={`px-4 py-2 text-sm ${toolEnabled ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+              {toolEnabled ? (
+                <>
+                  <Power className="h-4 w-4 mr-1 inline" />
+                  Tool Enabled
+                </>
+              ) : (
+                <>
+                  <PowerOff className="h-4 w-4 mr-1 inline" />
+                  Tool Disabled
+                </>
+              )}
+            </Badge>
+          )}
+          
           {user && (
             <Badge className="bg-blue-100 text-blue-800 px-4 py-2 text-sm">
               <CreditCard className="h-4 w-4 mr-1 inline" />
@@ -473,7 +598,13 @@ export default function TitleGeneratorPage() {
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
               {/* Left Column - Input Form */}
               <div className="lg:col-span-2 space-y-8">
-                <Card className={`shadow-xl border-0 ${!canAfford && user ? 'border-red-300 bg-red-50/30' : 'bg-linear-to-br from-white to-gray-50'}`}>
+                <Card className={`shadow-xl border-0 ${
+                  user && !toolEnabled 
+                    ? 'border-red-300 bg-red-50/30 opacity-75' 
+                    : !canAfford && user 
+                      ? 'border-red-300 bg-red-50/30' 
+                      : 'bg-linear-to-br from-white to-gray-50'
+                }`}>
                   <CardHeader className="border-b">
                     <CardTitle className="flex items-center gap-2 text-2xl">
                       <Wand2 className="h-6 w-6 text-purple-600" />
@@ -484,8 +615,26 @@ export default function TitleGeneratorPage() {
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="pt-6 space-y-6">
+                    {/* Tool Disabled Warning */}
+                    {user && !toolEnabled && (
+                      <div className="p-4 bg-red-50 border border-red-300 rounded-lg flex items-center gap-3">
+                        <PowerOff className="h-5 w-5 text-red-500" />
+                        <div className="flex-1">
+                          <p className="text-red-700 font-medium">Tool Disabled by Administrator</p>
+                          <p className="text-sm text-red-600">
+                            The title generator tool has been disabled. Please contact support if you believe this is an error.
+                          </p>
+                          {toolDetails?.source === 'custom' && toolDetails?.updatedBy && (
+                            <p className="text-xs text-red-500 mt-1">
+                              Disabled by {toolDetails.updatedBy} on {new Date(toolDetails.updatedAt).toLocaleDateString()}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
                     {/* Credit Warning */}
-                    {user && !canAfford && (
+                    {user && !canAfford && toolEnabled && (
                       <div className="p-4 bg-red-50 border border-red-200 rounded-lg flex items-center gap-3">
                         <AlertCircle className="h-5 w-5 text-red-500" />
                         <div className="flex-1">
@@ -538,12 +687,17 @@ export default function TitleGeneratorPage() {
                           placeholder="e.g., Digital Marketing, Healthy Recipes, Travel Tips..."
                           value={topic}
                           onChange={(e) => setTopic(e.target.value)}
-                          className="h-14 text-lg border-2 border-blue-300 focus:border-blue-500 pl-12 shadow-sm"
+                          className={`h-14 text-lg border-2 pl-12 shadow-sm ${
+                            user && !toolEnabled 
+                              ? 'border-gray-300 bg-gray-100 cursor-not-allowed' 
+                              : 'border-blue-300 focus:border-blue-500'
+                          }`}
+                          disabled={user && !toolEnabled} // Disable input if tool is disabled
                         />
                         <Lightbulb className="absolute left-4 top-4 h-6 w-6 text-blue-400" />
                       </div>
                       
-                      {showSuggestions && (
+                      {showSuggestions && toolEnabled && (
                         <div className="space-y-2">
                           <Label className="text-sm text-gray-500 flex items-center gap-2">
                             <Filter className="h-3 w-3" />
@@ -554,7 +708,10 @@ export default function TitleGeneratorPage() {
                               <button
                                 key={idx}
                                 onClick={() => useSuggestion(suggestion.value)}
-                                className="flex items-center gap-2 px-3 py-2 rounded-lg border hover:shadow-md transition-all duration-200 hover:scale-105"
+                                disabled={user && !toolEnabled}
+                                className={`flex items-center gap-2 px-3 py-2 rounded-lg border hover:shadow-md transition-all duration-200 ${
+                                  user && !toolEnabled ? 'opacity-50 cursor-not-allowed' : 'hover:scale-105'
+                                }`}
                                 style={{ background: suggestion.color + '20' }}
                               >
                                 <div className={`p-1.5 rounded-md ${suggestion.color} text-white`}>
@@ -583,7 +740,10 @@ export default function TitleGeneratorPage() {
                           <button
                             key={platform.value}
                             onClick={() => togglePlatform(platform.value)}
+                            disabled={user && !toolEnabled}
                             className={`flex items-center gap-2 p-3 rounded-lg border-2 transition-all duration-200 ${
+                              user && !toolEnabled ? 'opacity-50 cursor-not-allowed' : ''
+                            } ${
                               selectedPlatforms.includes(platform.value)
                                 ? `${platform.color} text-white border-transparent shadow-lg scale-105`
                                 : 'bg-white border-gray-200 hover:border-gray-300 text-gray-700'
@@ -605,8 +765,14 @@ export default function TitleGeneratorPage() {
                         <Palette className="h-5 w-5 text-purple-500" />
                         Title Style
                       </Label>
-                      <Select value={titleStyle} onValueChange={setTitleStyle}>
-                        <SelectTrigger className="border-2 border-purple-300 h-12">
+                      <Select 
+                        value={titleStyle} 
+                        onValueChange={setTitleStyle}
+                        disabled={user && !toolEnabled}
+                      >
+                        <SelectTrigger className={`border-2 h-12 ${
+                          user && !toolEnabled ? 'border-gray-300 bg-gray-100' : 'border-purple-300'
+                        }`}>
                           <SelectValue placeholder="Select title style" />
                         </SelectTrigger>
                         <SelectContent>
@@ -642,6 +808,7 @@ export default function TitleGeneratorPage() {
                         min={6}
                         step={3}
                         className="mt-4"
+                        disabled={user && !toolEnabled}
                       />
                       <p className="text-xs text-gray-500">
                         ~{Math.ceil(titleCount / selectedPlatforms.length)} titles per platform
@@ -666,17 +833,26 @@ export default function TitleGeneratorPage() {
                         min={1}
                         step={1}
                         className="mt-4"
+                        disabled={user && !toolEnabled}
                       />
                     </div>
 
                     {/* Generate Button */}
                     <Button
                       onClick={generateTitles}
-                      disabled={loading || !topic.trim() || selectedPlatforms.length === 0 || (user && !canAfford)}
+                      disabled={
+                        loading || 
+                        !topic.trim() || 
+                        selectedPlatforms.length === 0 || 
+                        (user && !canAfford) ||
+                        (user && !toolEnabled)
+                      }
                       className={`w-full h-14 text-lg ${
-                        user && !canAfford
+                        user && !toolEnabled
                           ? 'bg-gray-400 cursor-not-allowed'
-                          : 'bg-linear-to-r from-blue-600 via-purple-600 to-pink-600 hover:from-blue-700 hover:via-purple-700 hover:to-pink-700'
+                          : user && !canAfford
+                            ? 'bg-gray-400 cursor-not-allowed'
+                            : 'bg-linear-to-r from-blue-600 via-purple-600 to-pink-600 hover:from-blue-700 hover:via-purple-700 hover:to-pink-700'
                       } shadow-lg hover:shadow-xl transition-all duration-300`}
                     >
                       {loading ? (
@@ -684,12 +860,20 @@ export default function TitleGeneratorPage() {
                           <Loader2 className="h-5 w-5 animate-spin mr-2" />
                           Generating Titles...
                         </>
+                      ) : user && !toolEnabled ? (
+                        <>
+                          <PowerOff className="h-5 w-5 mr-2" />
+                          Tool Disabled by Admin
+                        </>
+                      ) : user && !canAfford ? (
+                        <>
+                          <Coins className="h-5 w-5 mr-2" />
+                          Need {toolCost} Credits (You have {balance})
+                        </>
                       ) : (
                         <>
                           <Wand2 className="h-5 w-5 mr-2" />
-                          {user && !canAfford 
-                            ? `Need ${toolCost} Credits (You have ${balance})` 
-                            : `Generate ${titleCount} Platform Titles (${toolCost} Credits)`}
+                          Generate {titleCount} Platform Titles ({toolCost} Credits)
                         </>
                       )}
                     </Button>
@@ -744,7 +928,8 @@ export default function TitleGeneratorPage() {
                           const examples = ['Digital Marketing Tips', 'Healthy Breakfast Ideas', 'Travel Hacks'];
                           setTopic(examples[Math.floor(Math.random() * examples.length)]);
                         }}
-                        className="h-10"
+                        disabled={user && !toolEnabled}
+                        className={`h-10 ${user && !toolEnabled ? 'opacity-50 cursor-not-allowed' : ''}`}
                       >
                         <Sparkles className="h-3 w-3 mr-1" />
                         Example
@@ -756,7 +941,8 @@ export default function TitleGeneratorPage() {
                           setTopic('');
                           setTitles([]);
                         }}
-                        className="h-10"
+                        disabled={user && !toolEnabled}
+                        className={`h-10 ${user && !toolEnabled ? 'opacity-50 cursor-not-allowed' : ''}`}
                       >
                         <Clipboard className="h-3 w-3 mr-1" />
                         Clear
@@ -765,8 +951,8 @@ export default function TitleGeneratorPage() {
                         variant="outline" 
                         size="sm"
                         onClick={copyAllTitles}
-                        disabled={titles.length === 0}
-                        className="h-10"
+                        disabled={titles.length === 0 || (user && !toolEnabled)}
+                        className={`h-10 ${user && !toolEnabled ? 'opacity-50 cursor-not-allowed' : ''}`}
                       >
                         <Copy className="h-3 w-3 mr-1" />
                         Copy All
@@ -775,8 +961,8 @@ export default function TitleGeneratorPage() {
                         variant="outline" 
                         size="sm"
                         onClick={downloadTitles}
-                        disabled={titles.length === 0}
-                        className="h-10"
+                        disabled={titles.length === 0 || (user && !toolEnabled)}
+                        className={`h-10 ${user && !toolEnabled ? 'opacity-50 cursor-not-allowed' : ''}`}
                       >
                         <Download className="h-3 w-3 mr-1" />
                         Download
@@ -821,8 +1007,11 @@ export default function TitleGeneratorPage() {
                             variant="ghost"
                             size="sm"
                             onClick={() => toggleLike(originalIndex)}
+                            disabled={user && !toolEnabled}
                           >
-                            <Star className="h-4 w-4 fill-yellow-500 text-yellow-500" />
+                            <Star className={`h-4 w-4 ${
+                              user && !toolEnabled ? 'text-gray-400' : 'fill-yellow-500 text-yellow-500'
+                            }`} />
                           </Button>
                         </div>
                       );
@@ -870,7 +1059,8 @@ export default function TitleGeneratorPage() {
                 <Button 
                   variant="outline" 
                   onClick={copyAllTitles}
-                  className="border-2 border-blue-300"
+                  disabled={user && !toolEnabled}
+                  className={`border-2 border-blue-300 ${user && !toolEnabled ? 'opacity-50 cursor-not-allowed' : ''}`}
                 >
                   <Copy className="mr-2 h-4 w-4" />
                   Copy All
@@ -878,7 +1068,8 @@ export default function TitleGeneratorPage() {
                 <Button 
                   variant="outline" 
                   onClick={downloadTitles}
-                  className="border-2 border-green-300"
+                  disabled={user && !toolEnabled}
+                  className={`border-2 border-green-300 ${user && !toolEnabled ? 'opacity-50 cursor-not-allowed' : ''}`}
                 >
                   <Download className="mr-2 h-4 w-4" />
                   Download
@@ -945,12 +1136,13 @@ export default function TitleGeneratorPage() {
                                         variant="ghost"
                                         size="icon"
                                         onClick={() => toggleLike(originalIndex)}
-                                        className="h-8 w-8"
+                                        disabled={user && !toolEnabled}
+                                        className={user && !toolEnabled ? 'opacity-50 cursor-not-allowed' : ''}
                                       >
                                         <Star className={`h-4 w-4 ${
                                           likedTitles.includes(originalIndex) 
                                             ? 'text-yellow-500 fill-yellow-500' 
-                                            : 'text-gray-400 hover:text-yellow-500'
+                                            : user && !toolEnabled ? 'text-gray-300' : 'text-gray-400 hover:text-yellow-500'
                                         }`} />
                                       </Button>
                                     </div>
@@ -964,7 +1156,8 @@ export default function TitleGeneratorPage() {
                                     variant="outline"
                                     size="sm"
                                     onClick={() => copyToClipboard(title.title, originalIndex)}
-                                    className="flex-1"
+                                    disabled={user && !toolEnabled}
+                                    className={`flex-1 ${user && !toolEnabled ? 'opacity-50 cursor-not-allowed' : ''}`}
                                   >
                                     {copiedStates[originalIndex] ? (
                                       <>
@@ -991,7 +1184,8 @@ export default function TitleGeneratorPage() {
                                         copyToClipboard(title.title, originalIndex);
                                       }
                                     }}
-                                    className="flex-1"
+                                    disabled={user && !toolEnabled}
+                                    className={`flex-1 ${user && !toolEnabled ? 'opacity-50 cursor-not-allowed' : ''}`}
                                   >
                                     <Share2 className="mr-2 h-3 w-3" />
                                     Share

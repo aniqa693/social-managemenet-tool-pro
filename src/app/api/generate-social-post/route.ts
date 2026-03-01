@@ -1,8 +1,7 @@
-// app/api/generate-social-post/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '../../../../db';
 import { socialPostsTable } from '../../../../db/schema';
-import { desc, eq } from 'drizzle-orm';
+import { desc, eq, and } from 'drizzle-orm';
 import { getServerSession } from '../../../../lib/auth-server';
 import ImageKit from 'imagekit';
 import OpenAI from 'openai';
@@ -10,6 +9,7 @@ import Replicate from 'replicate';
 import moment from 'moment';
 import axios from 'axios';
 import { CreditManager } from '../../../../lib/credit-manager';
+import { userToolPermissions, toolPricingTable } from '../../../../db/schema';
 
 // Initialize services
 const imagekit = new ImageKit({
@@ -26,6 +26,36 @@ const openai = new OpenAI({
 const replicate = new Replicate({
   auth: process.env.REPLICATE_API_KEY,
 });
+
+// NEW: Helper function to check if tool is enabled for user
+async function isToolEnabledForUser(userId: string, toolName: string): Promise<boolean> {
+  try {
+    // First check if there's a custom permission for this user
+    const userPermission = await db.query.userToolPermissions.findFirst({
+      where: and(
+        eq(userToolPermissions.userId, userId),
+        eq(userToolPermissions.toolName, toolName)
+      )
+    });
+
+    // If custom permission exists, use that
+    if (userPermission) {
+      return userPermission.isEnabled;
+    }
+
+    // Otherwise check global tool setting
+    const toolSetting = await db.query.toolPricingTable.findFirst({
+      where: eq(toolPricingTable.tool_name, toolName)
+    });
+
+    // Default to true if no setting found (for backward compatibility)
+    return toolSetting?.enable_disenable ?? true;
+    
+  } catch (error) {
+    console.error('Error checking tool enabled status:', error);
+    return true; // Default to enabled on error
+  }
+}
 
 // Helper function to get file buffer
 const getFileBufferData = async (file: File) => {
@@ -65,13 +95,13 @@ const generateSocialPrompt = async (
   const messages: any[] = [];
 
   // Platform-specific style guidelines
-  const platformStyles = {
+  const platformStyles: { [key: string]: string } = {
     instagram: "Create a vibrant, aesthetically pleasing Instagram post. Use trendy colors, modern design, and engaging visuals that work well in the Instagram feed.",
     facebook: "Create an engaging Facebook post with clear messaging, bold visuals, and design that performs well in the news feed. Optimize for both mobile and desktop viewing."
   };
 
   // Aspect ratio specific guidance
-  const ratioGuidance = {
+  const ratioGuidance: { [key: string]: string } = {
     '1:1': "Square format - perfect for Instagram feed. Keep the subject centered and well-balanced.",
     '4:5': "Portrait format - ideal for Instagram feed and stories. Use vertical composition with focus on the upper portion.",
     '16:9': "Landscape format - great for Facebook feed and video thumbnails. Use horizontal composition.",
@@ -80,8 +110,8 @@ const generateSocialPrompt = async (
 
   let promptText = `Create a text prompt for generating a high-quality ${platform} post with ${aspectRatio} aspect ratio. 
 Based on this description: "${userInput}".
-${platformStyles[platform as keyof typeof platformStyles]}
-${ratioGuidance[aspectRatio as keyof typeof ratioGuidance]}
+${platformStyles[platform] || platformStyles.instagram}
+${ratioGuidance[aspectRatio] || ratioGuidance['1:1']}
 
 Important guidelines:
 - Use bold, readable typography if text is needed
@@ -154,6 +184,20 @@ export async function POST(req: NextRequest) {
     
     const email = session.user.email;
     const userId = session.user.id;
+
+    // NEW: Check if tool is enabled for this user
+    const toolEnabled = await isToolEnabledForUser(userId, 'social_post_generator');
+    
+    if (!toolEnabled) {
+      console.log('🚫 Tool is disabled for user:', userId);
+      return NextResponse.json(
+        { 
+          error: 'tool_disabled',
+          message: 'This tool has been disabled by the administrator. Please contact support for assistance.'
+        },
+        { status: 403 }
+      );
+    }
 
     const formData = await req.formData();
     const userInput = formData.get('description') as string;
@@ -317,7 +361,7 @@ export async function POST(req: NextRequest) {
 
     console.log("✅ Social post saved to database, ID:", savedPost[0].id);
 
-    // Return response - FIXED: removed reference to undefined 'balance'
+    // Return response
     return NextResponse.json({ 
       success: true,
       postUrl: uploadedPost.url,

@@ -1,5 +1,6 @@
 import { relations } from "drizzle-orm";
-import { pgTable, text, timestamp, boolean, index, integer, varchar, json, jsonb } from "drizzle-orm/pg-core";
+//import { serial } from "drizzle-orm/mysql-core";
+import { serial,pgTable, text, timestamp, boolean, index, integer, varchar, json, jsonb, doublePrecision, uuid, uniqueIndex } from "drizzle-orm/pg-core";
 
 export const user = pgTable("user", {
   id: text("id").primaryKey(),
@@ -14,7 +15,7 @@ export const user = pgTable("user", {
     .notNull(),
       credits: integer("credits").default(0),
   role: text("role", { enum: ['admin', 'creator', 'analyst'] }).default("creator").notNull(),
-
+// enble_disenable:boolean("true")
  // role: text("role").default("creator"),
   // toolname:text("tname").default("no")
 });
@@ -222,4 +223,24 @@ export const toolPricingTable = pgTable("tool_pricing", {
   id: integer().primaryKey().generatedAlwaysAsIdentity(),
   tool_name: varchar({ length: 50 }).notNull().unique(),
   credits_required: integer().notNull(),
+   enable_disenable: boolean().default(true) // Added default true and notNull
+  
 });
+// src/lib/schema.js
+export const userToolPermissions = pgTable("user_tool_permissions", {
+  id: integer().primaryKey().generatedAlwaysAsIdentity(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  toolName: varchar("tool_name", { length: 50 }).notNull(),
+  isEnabled: boolean("is_enabled").default(true).notNull(),
+  updatedBy: text("updated_by"), // Admin who made the change
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("user_tool_userId_idx").on(table.userId),
+  index("user_tool_name_idx").on(table.toolName),
+  // Ensure one record per user per tool
+  uniqueIndex("user_tool_unique").on(table.userId, table.toolName)
+]);
+

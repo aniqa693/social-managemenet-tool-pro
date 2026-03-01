@@ -1,7 +1,6 @@
-// app/dashboard/social-posts/page.tsx
 'use client';
 
-import { Upload, ImagePlus, X, Loader2, Download, Sparkles, Instagram, Facebook, Coins, CreditCard, AlertCircle } from 'lucide-react';
+import { Upload, ImagePlus, X, Loader2, Download, Sparkles, Instagram, Facebook, Coins, CreditCard, AlertCircle, PowerOff, Power } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import Image from 'next/image';
 import axios from 'axios';
@@ -50,6 +49,11 @@ export default function SocialPostGeneratorPage() {
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const { toast } = useToast();
   
+  // NEW: Tool enabled/disabled state
+  const [toolEnabled, setToolEnabled] = useState<boolean>(true);
+  const [checkingToolStatus, setCheckingToolStatus] = useState<boolean>(true);
+  const [toolDetails, setToolDetails] = useState<any>(null);
+  
   // Get session from Better Auth
   const { data: session, isPending: sessionLoading } = useSession();
   const isLoggedIn = !!session?.user;
@@ -66,6 +70,45 @@ export default function SocialPostGeneratorPage() {
     toolCost,
     fetchToolCost 
   } = useCredits(userId);
+
+  // NEW: Check if tool is enabled for this user
+  useEffect(() => {
+    const checkToolStatus = async () => {
+      if (!userId) {
+        setCheckingToolStatus(false);
+        setToolEnabled(true); // Default to enabled for unauthenticated
+        return;
+      }
+
+      try {
+        setCheckingToolStatus(true);
+        console.log('🔍 Checking tool status for user:', userId, 'tool: social_post_generator');
+        
+        const response = await fetch(`/api/tools/status?userId=${userId}&toolName=social_post_generator`);
+        const data = await response.json();
+
+        if (response.ok) {
+          setToolEnabled(data.enabled);
+          setToolDetails(data);
+          console.log('✅ Tool status:', { enabled: data.enabled, source: data.source });
+          
+          if (!data.enabled) {
+            console.log('⚠️ Social post generator is disabled for this user');
+          }
+        } else {
+          console.error('Failed to check tool status:', data.error);
+          setToolEnabled(true); // Default to enabled on error
+        }
+      } catch (error) {
+        console.error('Error checking tool status:', error);
+        setToolEnabled(true); // Default to enabled on error
+      } finally {
+        setCheckingToolStatus(false);
+      }
+    };
+
+    checkToolStatus();
+  }, [userId]);
 
   // Check if user can afford (3 credits per generation as specified)
   const canAfford = isLoggedIn ? (balance >= toolCost) : false;
@@ -101,6 +144,16 @@ export default function SocialPostGeneratorPage() {
   };
 
   const handleSubmit = async () => {
+    // NEW: Check if tool is disabled by admin
+    if (!toolEnabled) {
+      toast({
+        title: "Tool Disabled",
+        description: "This tool has been disabled by the administrator. Please contact support for assistance.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     if (!isLoggedIn) {
       toast({
         title: "Authentication required",
@@ -167,8 +220,17 @@ export default function SocialPostGeneratorPage() {
     } catch (e: any) {
       console.error('Generation error:', e);
       
+      // Handle tool disabled errors
+      if (e.response?.status === 403 && e.response?.data?.error === 'tool_disabled') {
+        setToolEnabled(false);
+        toast({
+          title: "Tool Disabled",
+          description: e.response?.data?.message || "This tool has been disabled by the administrator.",
+          variant: "destructive",
+        });
+      }
       // Handle credit-specific errors
-      if (e.response?.status === 403) {
+      else if (e.response?.status === 403) {
         toast({
           title: "Insufficient Credits",
           description: e.response?.data?.message || "You don't have enough credits to generate a post.",
@@ -203,6 +265,16 @@ export default function SocialPostGeneratorPage() {
       return;
     }
     
+    // NEW: Check if tool is disabled
+    if (!toolEnabled) {
+      toast({
+        title: "Tool Disabled",
+        description: "Download unavailable - tool disabled by administrator",
+        variant: "destructive",
+      });
+      return;
+    }
+    
     try {
       const response = await fetch(outputPostImage);
       const blob = await response.blob();
@@ -228,10 +300,13 @@ export default function SocialPostGeneratorPage() {
     }
   };
 
-  if (sessionLoading) {
+  if (sessionLoading || checkingToolStatus) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-50 flex items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+        <div className="text-center">
+          <Loader2 className="h-12 w-12 animate-spin text-blue-600 mx-auto" />
+          <p className="mt-4 text-gray-600">Loading...</p>
+        </div>
       </div>
     );
   }
@@ -257,12 +332,36 @@ export default function SocialPostGeneratorPage() {
             Create stunning social media posts for Instagram and Facebook with perfect dimensions for every format.
           </p>
           
+          {/* Tool Status Indicator */}
+          {!toolEnabled && (
+            <div className="flex items-center gap-2 bg-red-100 text-red-700 px-4 py-2 rounded-full border border-red-300">
+              <PowerOff className="h-4 w-4" />
+              <span className="text-sm font-medium">Tool Disabled by Admin</span>
+            </div>
+          )}
+          
           {/* Credit Info Bar */}
           <div className="flex flex-wrap justify-center gap-3 mt-2">
             <Badge className="bg-purple-100 text-purple-800 px-4 py-2 text-sm shadow-sm">
               <Coins className="h-4 w-4 mr-1 inline" />
               Cost: {toolCost} credits per post
             </Badge>
+            
+            {/* Tool Status Badge */}
+            <Badge className={`px-4 py-2 text-sm shadow-sm ${toolEnabled ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+              {toolEnabled ? (
+                <>
+                  <Power className="h-4 w-4 mr-1 inline" />
+                  Tool Enabled
+                </>
+              ) : (
+                <>
+                  <PowerOff className="h-4 w-4 mr-1 inline" />
+                  Tool Disabled
+                </>
+              )}
+            </Badge>
+            
             <Badge className="bg-blue-100 text-blue-800 px-4 py-2 text-sm shadow-sm">
               <CreditCard className="h-4 w-4 mr-1 inline" />
               Your balance: {balance} credits
@@ -280,8 +379,26 @@ export default function SocialPostGeneratorPage() {
           </div>
         </div>
 
+        {/* Tool Disabled Warning */}
+        {!toolEnabled && (
+          <div className="max-w-2xl mx-auto p-4 bg-red-50 border border-red-300 rounded-lg flex items-center gap-3 mb-4">
+            <PowerOff className="h-5 w-5 text-red-500 flex-shrink-0" />
+            <div className="flex-1 text-left">
+              <p className="text-red-700 font-medium">Tool Disabled by Administrator</p>
+              <p className="text-sm text-red-600">
+                The social post generator has been disabled. Please contact support if you believe this is an error.
+              </p>
+              {toolDetails?.source === 'custom' && toolDetails?.updatedBy && (
+                <p className="text-xs text-red-500 mt-1">
+                  Disabled by {toolDetails.updatedBy} on {new Date(toolDetails.updatedAt).toLocaleDateString()}
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Credit Warning */}
-        {balance < toolCost && (
+        {balance < toolCost && toolEnabled && (
           <div className="max-w-2xl mx-auto p-4 bg-red-50 border border-red-200 rounded-lg flex items-center gap-3 mb-4">
             <AlertCircle className="h-5 w-5 text-red-500 flex-shrink-0" />
             <div className="flex-1 text-left">
@@ -312,7 +429,7 @@ export default function SocialPostGeneratorPage() {
                   setSelectedPlatform(key as 'instagram' | 'facebook');
                   setSelectedRatio(platform.ratios[0].value);
                 }}
-                disabled={loading || balance < toolCost}
+                disabled={loading || balance < toolCost || !toolEnabled}
                 className={`flex items-center gap-3 px-6 py-3 rounded-xl font-medium transition-all duration-200 ${
                   isSelected
                     ? `bg-gradient-to-r ${platform.color} text-white shadow-lg scale-105`
@@ -335,7 +452,7 @@ export default function SocialPostGeneratorPage() {
             <button
               key={ratio.value}
               onClick={() => setSelectedRatio(ratio.value)}
-              disabled={loading || balance < toolCost}
+              disabled={loading || balance < toolCost || !toolEnabled}
               className={`p-3 rounded-xl border-2 transition-all duration-200 ${
                 selectedRatio === ratio.value
                   ? `border-${selectedPlatform === 'instagram' ? 'purple' : 'blue'}-500 bg-gradient-to-br from-white to-${selectedPlatform === 'instagram' ? 'purple' : 'blue'}-50 shadow-md`
@@ -381,7 +498,10 @@ export default function SocialPostGeneratorPage() {
                   <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-end justify-center p-4">
                     <button
                       onClick={downloadPost}
-                      className="transform translate-y-4 group-hover:translate-y-0 transition-transform duration-300 flex items-center gap-2 px-4 py-2 bg-white text-gray-800 rounded-full font-medium shadow-lg hover:bg-gray-50 hover:scale-105 active:scale-95"
+                      disabled={!toolEnabled}
+                      className={`transform translate-y-4 group-hover:translate-y-0 transition-transform duration-300 flex items-center gap-2 px-4 py-2 bg-white text-gray-800 rounded-full font-medium shadow-lg hover:bg-gray-50 hover:scale-105 active:scale-95 ${
+                        !toolEnabled ? 'opacity-50 cursor-not-allowed' : ''
+                      }`}
                     >
                       <Download className="h-5 w-5 text-blue-600" />
                       Download
@@ -404,6 +524,11 @@ export default function SocialPostGeneratorPage() {
                 <p className="text-xs text-gray-400 mt-2">
                   Cost: {toolCost} credits per generation
                 </p>
+                {!toolEnabled && (
+                  <p className="text-xs text-red-500 mt-2 font-medium">
+                    Tool disabled by administrator
+                  </p>
+                )}
               </div>
             )}
           </div>
@@ -421,14 +546,20 @@ export default function SocialPostGeneratorPage() {
             placeholder={`Describe your ${currentPlatform.name} post... (e.g., "A motivational quote with mountain background" or "Product showcase for summer sale")`}
             onChange={(e) => setUserInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            disabled={loading || balance < toolCost}
-            className="w-full px-5 py-4 pr-14 border-2 border-blue-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent text-base bg-white text-gray-800 placeholder-gray-400 resize-none transition-all duration-200 shadow-md hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+            disabled={loading || balance < toolCost || !toolEnabled}
+            className={`w-full px-5 py-4 pr-14 border-2 rounded-2xl focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent text-base text-gray-800 placeholder-gray-400 resize-none transition-all duration-200 shadow-md hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed ${
+              !toolEnabled ? 'bg-gray-100 border-gray-300' : 'bg-white border-blue-200'
+            }`}
           />
           <button
             onClick={handleSubmit}
-            disabled={loading || !userInput || balance < toolCost}
-            className={`absolute right-3 bottom-3 text-white bg-gradient-to-r ${currentPlatform.color} hover:from-opacity-90 hover:to-opacity-90 p-3 cursor-pointer rounded-full shadow-lg transform hover:scale-105 active:scale-95 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none`}
-            title="Generate post"
+            disabled={loading || !userInput || balance < toolCost || !toolEnabled}
+            className={`absolute right-3 bottom-3 text-white p-3 cursor-pointer rounded-full shadow-lg transform hover:scale-105 active:scale-95 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none ${
+              toolEnabled 
+                ? `bg-gradient-to-r ${currentPlatform.color} hover:from-opacity-90 hover:to-opacity-90` 
+                : 'bg-gray-400'
+            }`}
+            title={!toolEnabled ? "Tool disabled" : "Generate post"}
           >
             {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Upload className="h-5 w-5" />}
           </button>
@@ -438,12 +569,28 @@ export default function SocialPostGeneratorPage() {
         <div className="flex flex-col items-center gap-4">
           <label htmlFor="includeimage" className="w-full max-w-md">
             {!includeImagePreview ? (
-              <div className={`flex items-center justify-center gap-2 px-6 py-3 border-2 border-dashed border-blue-300 rounded-xl hover:border-blue-500 text-gray-700 w-full transition-all duration-200 hover:shadow-md hover:scale-[1.02] active:scale-100 cursor-pointer bg-white group relative overflow-hidden ${loading || balance < toolCost ? 'opacity-50 cursor-not-allowed' : ''}`}>
+              <div className={`flex items-center justify-center gap-2 px-6 py-3 border-2 border-dashed rounded-xl transition-all duration-200 w-full group relative overflow-hidden ${
+                loading || balance < toolCost || !toolEnabled 
+                  ? 'border-gray-300 bg-gray-100 opacity-50 cursor-not-allowed' 
+                  : 'border-blue-300 hover:border-blue-500 text-gray-700 hover:shadow-md hover:scale-[1.02] active:scale-100 cursor-pointer bg-white'
+              }`}>
                 <div className="absolute inset-0 bg-gradient-to-r from-blue-100 to-purple-100 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-                <div className="p-2 bg-blue-100 rounded-full group-hover:bg-blue-200 transition-colors z-10">
-                  <ImagePlus className="w-5 h-5 text-blue-600" />
+                <div className={`p-2 rounded-full transition-colors z-10 ${
+                  loading || balance < toolCost || !toolEnabled 
+                    ? 'bg-gray-200' 
+                    : 'bg-blue-100 group-hover:bg-blue-200'
+                }`}>
+                  <ImagePlus className={`w-5 h-5 ${
+                    loading || balance < toolCost || !toolEnabled 
+                      ? 'text-gray-400' 
+                      : 'text-blue-600'
+                  }`} />
                 </div>
-                <span className="font-medium z-10">Include Image (Optional)</span>
+                <span className={`font-medium z-10 ${
+                  loading || balance < toolCost || !toolEnabled ? 'text-gray-400' : 'text-gray-700'
+                }`}>
+                  {!toolEnabled ? 'Tool Disabled' : 'Include Image (Optional)'}
+                </span>
               </div>
             ) : (
               <div className='relative h-32 w-full rounded-xl overflow-hidden group cursor-pointer border-2 border-blue-400 bg-white'>
@@ -473,7 +620,7 @@ export default function SocialPostGeneratorPage() {
             className='hidden' 
             onChange={handleFileChange}
             accept="image/*"
-            disabled={loading || balance < toolCost}
+            disabled={loading || balance < toolCost || !toolEnabled}
           />
         </div>
 
@@ -485,6 +632,9 @@ export default function SocialPostGeneratorPage() {
             {balance < toolCost && (
               <span className="ml-2 text-xs text-red-500">(Need {toolCost - balance} more)</span>
             )}
+            {!toolEnabled && (
+              <span className="ml-2 text-xs text-red-500">(Tool Disabled)</span>
+            )}
           </div>
           
           {(userInput || includeImagePreview) && (
@@ -494,7 +644,10 @@ export default function SocialPostGeneratorPage() {
                 clearPreviews();
                 setOutputPostImage('');
               }}
-              className="px-4 py-2 text-sm text-gray-500 hover:text-gray-700 transition-colors hover:underline"
+              disabled={!toolEnabled}
+              className={`px-4 py-2 text-sm transition-colors hover:underline ${
+                !toolEnabled ? 'text-gray-300 cursor-not-allowed' : 'text-gray-500 hover:text-gray-700'
+              }`}
             >
               Clear Form
             </button>

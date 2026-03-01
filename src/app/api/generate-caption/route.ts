@@ -1,11 +1,42 @@
-// app/api/generate-caption/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { db } from '../../../../db';
 import { captions } from '../../../../db/schema';
 import { CreditManager } from '../../../../lib/credit-manager';
+import { eq, and } from 'drizzle-orm';
+import { userToolPermissions, toolPricingTable } from '../../../../db/schema';
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+
+// NEW: Helper function to check if tool is enabled for user
+async function isToolEnabledForUser(userId: string, toolName: string): Promise<boolean> {
+  try {
+    // First check if there's a custom permission for this user
+    const userPermission = await db.query.userToolPermissions.findFirst({
+      where: and(
+        eq(userToolPermissions.userId, userId),
+        eq(userToolPermissions.toolName, toolName)
+      )
+    });
+
+    // If custom permission exists, use that
+    if (userPermission) {
+      return userPermission.isEnabled;
+    }
+
+    // Otherwise check global tool setting
+    const toolSetting = await db.query.toolPricingTable.findFirst({
+      where: eq(toolPricingTable.tool_name, toolName)
+    });
+
+    // Default to true if no setting found (for backward compatibility)
+    return toolSetting?.enable_disenable ?? true;
+    
+  } catch (error) {
+    console.error('Error checking tool enabled status:', error);
+    return true; // Default to enabled on error
+  }
+}
 
 // Helper function to save to database
 async function saveToDatabase(
@@ -46,14 +77,32 @@ export async function POST(request: NextRequest) {
       includeTrending, 
       creativityLevel, 
       userEmail,
-      userId
+      userId,
+      action // NEW: Check if this is a save action
     } = await request.json();
 
     console.log('👤 User identification:', {
       userEmail,
       userId,
-      hasUser: !!userEmail && !!userId
+      hasUser: !!userEmail && !!userId,
+      action: action || 'generate'
     });
+
+    // NEW: Check if tool is enabled for this user (for both generate and save actions)
+    if (userId) {
+      const toolEnabled = await isToolEnabledForUser(userId, 'caption_generator');
+      
+      if (!toolEnabled) {
+        console.log('🚫 Tool is disabled for user:', userId);
+        return NextResponse.json(
+          { 
+            error: 'tool_disabled',
+            message: 'This tool has been disabled by the administrator. Please contact support for assistance.'
+          },
+          { status: 403 }
+        );
+      }
+    }
 
     if (!niche) {
       return NextResponse.json(
@@ -102,6 +151,60 @@ export async function POST(request: NextRequest) {
         { error: 'Failed to verify credits. Please try again.' },
         { status: 500 }
       );
+    }
+
+    // If this is just a save action (not generation), skip the AI generation
+    if (action === 'save-single') {
+      const { captionContent } = await request.json();
+      
+      // Prepare data for database
+      const contentForDB = {
+        captions: [captionContent],
+        settings: {
+          niche,
+          tone,
+          platform,
+          includeTrending,
+          creativityLevel,
+          generatedAt: new Date().toISOString()
+        },
+        metadata: {
+          totalCaptions: 1,
+          hasTrending: includeTrending,
+          isSaved: true
+        }
+      };
+
+      // Save to database
+      let savedRecord = null;
+      
+      try {
+        savedRecord = await saveToDatabase(
+          niche,
+          contentForDB,
+          platform || 'instagram',
+          tone || 'friendly',
+          userEmail,
+          userId
+        );
+        console.log('💾 Caption saved to database with ID:', savedRecord?.id);
+      } catch (dbError) {
+        console.error('⚠️ Failed to save to database:', dbError);
+        return NextResponse.json(
+          { error: 'Failed to save caption to database' },
+          { status: 500 }
+        );
+      }
+
+      return NextResponse.json({
+        success: true,
+        message: 'Caption saved successfully',
+        saveInfo: {
+          saved: true,
+          recordId: savedRecord?.id,
+          userEmail: userEmail
+        }
+      });
     }
 
     console.log('🚀 Generating captions for:', {
@@ -239,7 +342,7 @@ export async function POST(request: NextRequest) {
       console.error('⚠️ Failed to save to database, but continuing with response:', dbError);
     }
 
-    // Return response - FIXED: removed reference to undefined 'balance'
+    // Return response
     return NextResponse.json({
       success: true,
       captions: generatedCaptions,

@@ -1,6 +1,8 @@
 import { betterAuth } from "better-auth";
 import { nextCookies } from "better-auth/next-js";
 //import { neonAdapter } from "@better-auth/neon";
+import { stripe } from "@better-auth/stripe"
+import Stripe from "stripe"
 import { db } from "../db";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { user } from "../auth-schema";
@@ -8,6 +10,9 @@ import { eq } from "drizzle-orm";
 import { customSession } from "better-auth/plugins";
 export type UserRole = 'creator' | 'analyst' | 'admin';
 
+// const stripeClient = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+//     apiVersion: "2026-02-25.clover", // Latest API version as of Stripe SDK v20.0.0
+// })
 
 export const auth = betterAuth({
   //database: neonAdapter(db),

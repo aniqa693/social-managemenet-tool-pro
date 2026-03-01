@@ -1,8 +1,12 @@
 import { customSessionClient, inferAdditionalFields } from "better-auth/client/plugins"
 import { createAuthClient } from "better-auth/react"
+import { stripeClient } from "@better-auth/stripe/client"
+
 import { auth } from "./auth"
 export const authClient = createAuthClient({
-   plugins: [inferAdditionalFields<typeof auth>()],
+   plugins: [inferAdditionalFields<typeof auth>(), stripeClient({
+            subscription: true //if you want to enable subscription management
+        })],
 
   //  plugins: [customSessionClient<typeof auth>(),inferAdditionalFields<typeof auth>()],
 

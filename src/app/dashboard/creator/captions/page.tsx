@@ -12,7 +12,7 @@ import {
   Volume2, Check, Share2, Download, Star, Clock, 
   MessageSquare, Heart, Target, Wand2,
   ArrowDown, Clipboard, Grid, List, Eye, Filter, Database, Save,
-  Coins, AlertCircle, CreditCard
+  Coins, AlertCircle, CreditCard, Power, PowerOff
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
@@ -63,6 +63,10 @@ export default function Home() {
   const [savingIndex, setSavingIndex] = useState<number | null>(null);
   const [saveStatus, setSaveStatus] = useState<{saved: boolean; recordId?: number}>({saved: false});
   
+  // NEW: Tool enabled/disabled state
+  const [toolEnabled, setToolEnabled] = useState<boolean>(true);
+  const [checkingToolStatus, setCheckingToolStatus] = useState<boolean>(true);
+  
   // Credit management hook with real user ID
   const { 
     balance, 
@@ -100,6 +104,39 @@ export default function Home() {
     { value: 'linkedin', label: 'LinkedIn', icon: Linkedin, color: 'bg-gradient-to-r from-blue-700 to-blue-900' },
     { value: 'tiktok', label: 'TikTok', icon: MessageSquare, color: 'bg-gradient-to-r from-black to-gray-800' },
   ];
+
+  // NEW: Check if tool is enabled for this user
+  useEffect(() => {
+    const checkToolStatus = async () => {
+      if (!user?.id) {
+        setCheckingToolStatus(false);
+        return;
+      }
+
+      try {
+        setCheckingToolStatus(true);
+        const response = await fetch(`/api/user/tool-status?userId=${user.id}&toolName=caption_generator`);
+        const data = await response.json();
+
+        if (response.ok) {
+          setToolEnabled(data.enabled);
+          if (!data.enabled) {
+            console.log('⚠️ Tool is disabled by admin');
+          }
+        } else {
+          console.error('Failed to check tool status:', data.error);
+          setToolEnabled(true); // Default to enabled on error
+        }
+      } catch (error) {
+        console.error('Error checking tool status:', error);
+        setToolEnabled(true); // Default to enabled on error
+      } finally {
+        setCheckingToolStatus(false);
+      }
+    };
+
+    checkToolStatus();
+  }, [user]);
 
   // Check if user can afford
   const canAfford = user ? (balance >= toolCost) : false;
@@ -158,6 +195,18 @@ export default function Home() {
   };
 
   const generateCaptions = async () => {
+    // NEW: Check if tool is disabled by admin
+    if (!toolEnabled) {
+      toast.error(
+        <div className="flex items-center gap-2">
+          <PowerOff className="h-5 w-5 text-red-500" />
+          <span>This tool has been disabled by the administrator. Please contact support for assistance.</span>
+        </div>,
+        { duration: 5000 }
+      );
+      return;
+    }
+
     if (!niche.trim()) {
       toast.error('Please enter a niche');
       return;
@@ -206,6 +255,11 @@ export default function Home() {
       if (!response.ok) {
         // Handle credit-specific errors
         if (response.status === 403) {
+          if (data.error?.includes('disabled')) {
+            // Tool disabled error
+            setToolEnabled(false);
+            throw new Error(data.message || 'This tool has been disabled by the administrator');
+          }
           throw new Error(data.message || data.error || 'Insufficient credits');
         }
         throw new Error(data.error || 'Failed to generate captions');
@@ -298,6 +352,18 @@ export default function Home() {
 
   // Save individual caption
   const saveIndividualCaption = async (caption: CaptionType, index: number) => {
+    // NEW: Check if tool is disabled by admin before saving
+    if (!toolEnabled) {
+      toast.error(
+        <div className="flex items-center gap-2">
+          <PowerOff className="h-5 w-5 text-red-500" />
+          <span>This tool has been disabled by the administrator. Cannot save captions.</span>
+        </div>,
+        { duration: 4000 }
+      );
+      return;
+    }
+
     setSavingIndex(index);
     const saveToast = toast.loading(`Saving caption ${index + 1}...`);
 
@@ -321,6 +387,10 @@ export default function Home() {
       const data = await response.json();
       
       if (!response.ok) {
+        if (data.error?.includes('disabled')) {
+          setToolEnabled(false);
+          throw new Error('Tool has been disabled by administrator');
+        }
         throw new Error(data.error || 'Failed to save caption');
       }
       
@@ -342,7 +412,7 @@ export default function Home() {
     }
   };
 
-  if (isLoading) {
+  if (isLoading || checkingToolStatus) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
@@ -358,13 +428,21 @@ export default function Home() {
       <Toaster position="top-right" />
       
       <div className="max-w-6xl mx-auto">
-        {/* Header with Credit Display */}
+        {/* Header with Credit Display and Tool Status */}
         <header className="text-center mb-8">
           <div className="flex justify-between items-center mb-6">
             <div className="inline-flex items-center gap-3 bg-linear-to-r from-purple-600 to-pink-600 text-white px-6 py-3 rounded-full">
               <Wand2 className="h-6 w-6" />
               <span className="font-semibold">AI Caption Generator</span>
             </div>
+            
+            {/* Tool Status Indicator */}
+            {!toolEnabled && (
+              <div className="flex items-center gap-2 bg-red-100 text-red-700 px-4 py-2 rounded-full border border-red-300">
+                <PowerOff className="h-4 w-4" />
+                <span className="text-sm font-medium">Tool Disabled by Admin</span>
+              </div>
+            )}
             
             {/* Credit Display for Authenticated User */}
             <div className="flex items-center gap-3 bg-white shadow-md rounded-full px-6 py-3 border border-purple-200">
@@ -414,17 +492,38 @@ export default function Home() {
           </p>
 
           {/* Cost Display */}
-          <div className="mt-4 flex justify-center">
+          <div className="mt-4 flex justify-center gap-3">
             <Badge className="bg-purple-100 text-purple-800 px-4 py-2 text-sm">
               <Coins className="h-4 w-4 mr-1 inline" />
               Cost: {toolCost} credits per generation
+            </Badge>
+            
+            {/* Tool Status Badge */}
+            <Badge className={`px-4 py-2 text-sm ${toolEnabled ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+              {toolEnabled ? (
+                <>
+                  <Power className="h-4 w-4 mr-1 inline" />
+                  Tool Enabled
+                </>
+              ) : (
+                <>
+                  <PowerOff className="h-4 w-4 mr-1 inline" />
+                  Tool Disabled
+                </>
+              )}
             </Badge>
           </div>
         </header>
 
         {/* Input Section */}
         <div className="mb-8">
-          <Card className={`shadow-lg border ${!canAfford ? 'border-red-300 bg-red-50/30' : 'border-purple-200'}`}>
+          <Card className={`shadow-lg border ${
+            !toolEnabled 
+              ? 'border-red-300 bg-red-50/30 opacity-75' 
+              : !canAfford 
+                ? 'border-red-300 bg-red-50/30' 
+                : 'border-purple-200'
+          }`}>
             <CardHeader>
               <CardTitle className="text-xl text-purple-700 flex items-center gap-2">
                 <Clipboard className="h-5 w-5" />
@@ -435,8 +534,21 @@ export default function Home() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
+              {/* Tool Disabled Warning */}
+              {!toolEnabled && (
+                <div className="p-4 bg-red-50 border border-red-300 rounded-lg flex items-center gap-3">
+                  <PowerOff className="h-5 w-5 text-red-500" />
+                  <div className="flex-1">
+                    <p className="text-red-700 font-medium">Tool Disabled by Administrator</p>
+                    <p className="text-sm text-red-600">
+                      The caption generator tool has been disabled. Please contact support if you believe this is an error.
+                    </p>
+                  </div>
+                </div>
+              )}
+
               {/* Credit Warning */}
-              {!canAfford && (
+              {!canAfford && toolEnabled && (
                 <div className="p-4 bg-red-50 border border-red-200 rounded-lg flex items-center gap-3">
                   <AlertCircle className="h-5 w-5 text-red-500" />
                   <div className="flex-1">
@@ -467,11 +579,12 @@ export default function Home() {
                     value={niche}
                     onChange={(e) => setNiche(e.target.value)}
                     className="h-14 text-lg border-2 border-purple-300 focus:border-purple-500 pl-12"
+                    disabled={!toolEnabled} // NEW: Disable input if tool is disabled
                   />
                   <Sparkles className="absolute left-4 top-4 h-6 w-6 text-purple-400" />
                 </div>
                 
-                {showSuggestions && (
+                {showSuggestions && toolEnabled && ( // NEW: Only show suggestions if tool is enabled
                   <div className="space-y-2">
                     <Label className="text-sm text-gray-500 flex items-center gap-2">
                       <Filter className="h-3 w-3" />
@@ -500,7 +613,11 @@ export default function Home() {
                     <Share2 className="h-4 w-4 text-blue-500" />
                     Platform
                   </Label>
-                  <Select value={platform} onValueChange={setPlatform}>
+                  <Select 
+                    value={platform} 
+                    onValueChange={setPlatform}
+                    disabled={!toolEnabled} // NEW: Disable select if tool is disabled
+                  >
                     <SelectTrigger className="border-2 border-purple-300 h-12">
                       <SelectValue placeholder="Select platform" />
                     </SelectTrigger>
@@ -519,7 +636,11 @@ export default function Home() {
                     <Volume2 className="h-4 w-4 text-pink-500" />
                     Tone of Voice
                   </Label>
-                  <Select value={tone} onValueChange={setTone}>
+                  <Select 
+                    value={tone} 
+                    onValueChange={setTone}
+                    disabled={!toolEnabled} // NEW: Disable select if tool is disabled
+                  >
                     <SelectTrigger className="border-2 border-purple-300 h-12">
                       <SelectValue placeholder="Select tone" />
                     </SelectTrigger>
@@ -552,6 +673,7 @@ export default function Home() {
                     max={10}
                     min={1}
                     step={1}
+                    disabled={!toolEnabled} // NEW: Disable slider if tool is disabled
                   />
                 </div>
               </div>
@@ -562,7 +684,11 @@ export default function Home() {
                     <TrendingUp className="h-4 w-4 text-green-500" />
                     Include Trending Hashtags
                   </Label>
-                  <Switch checked={includeTrending} onCheckedChange={setIncludeTrending} />
+                  <Switch 
+                    checked={includeTrending} 
+                    onCheckedChange={setIncludeTrending}
+                    disabled={!toolEnabled} // NEW: Disable switch if tool is disabled
+                  />
                 </div>
 
                 <div className="flex items-center justify-between">
@@ -576,6 +702,7 @@ export default function Home() {
                       size="sm"
                       onClick={() => setViewMode('grid')}
                       className="rounded-none"
+                      disabled={!toolEnabled} // NEW: Disable button if tool is disabled
                     >
                       <Grid className="h-4 w-4 mr-2" />
                       Grid
@@ -585,6 +712,7 @@ export default function Home() {
                       size="sm"
                       onClick={() => setViewMode('list')}
                       className="rounded-none"
+                      disabled={!toolEnabled} // NEW: Disable button if tool is disabled
                     >
                       <List className="h-4 w-4 mr-2" />
                       List
@@ -601,11 +729,19 @@ export default function Home() {
 
               <Button
                 onClick={generateCaptions}
-                disabled={loading || !niche.trim() || !canAfford}
+                disabled={
+                  loading || 
+                  !niche.trim() || 
+                  !canAfford || 
+                  !toolEnabled || // NEW: Disable if tool is disabled
+                  checkingToolStatus
+                }
                 className={`w-full h-14 text-lg ${
-                  !canAfford
+                  !toolEnabled
                     ? 'bg-gray-400 cursor-not-allowed'
-                    : 'bg-linear-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700'
+                    : !canAfford
+                      ? 'bg-gray-400 cursor-not-allowed'
+                      : 'bg-linear-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700'
                 }`}
               >
                 {loading ? (
@@ -613,12 +749,20 @@ export default function Home() {
                     <Loader2 className="h-5 w-5 animate-spin mr-2" />
                     Generating Captions...
                   </>
+                ) : !toolEnabled ? (
+                  <>
+                    <PowerOff className="h-5 w-5 mr-2" />
+                    Tool Disabled by Admin
+                  </>
+                ) : !canAfford ? (
+                  <>
+                    <Coins className="h-5 w-5 mr-2" />
+                    Need {toolCost} Credits (You have {balance})
+                  </>
                 ) : (
                   <>
                     <Wand2 className="h-5 w-5 mr-2" />
-                    {!canAfford 
-                      ? `Need ${toolCost} Credits (You have ${balance})` 
-                      : `Generate Captions (${toolCost} Credits)`}
+                    Generate Captions ({toolCost} Credits)
                   </>
                 )}
               </Button>
@@ -680,7 +824,7 @@ export default function Home() {
               )}
             </div>
 
-            {captions.length > 0 && (
+            {captions.length > 0 && toolEnabled && ( // NEW: Only show action buttons if tool is enabled
               <div className="flex gap-2">
                 <Button variant="outline" onClick={copyAllCaptions}>
                   <Copy className="mr-2 h-4 w-4" />
@@ -733,23 +877,33 @@ export default function Home() {
                               </div>
                             </div>
                             <div className="flex gap-1">
-                              <Button variant="ghost" size="icon" onClick={() => toggleLike(index)}>
+                              <Button 
+                                variant="ghost" 
+                                size="icon" 
+                                onClick={() => toggleLike(index)}
+                                disabled={!toolEnabled} // NEW: Disable if tool is disabled
+                              >
                                 <Star className={`h-4 w-4 ${likedCaptions.includes(index) ? 'text-yellow-500 hover:text-yellow-600' : 'text-gray-400 hover:text-yellow-500'}`} />
                               </Button>
                               <Button 
                                 variant="ghost" 
                                 size="icon" 
                                 onClick={() => saveIndividualCaption(caption, index)}
-                                disabled={saving && savingIndex === index}
+                                disabled={saving && savingIndex === index || !toolEnabled} // NEW: Disable if tool is disabled
                               >
                                 {saving && savingIndex === index ? (
                                   <Loader2 className="h-4 w-4 animate-spin" />
                                 ) : (
-                                  <Save className="h-4 w-4 text-gray-600 hover:text-green-600" />
+                                  <Save className={`h-4 w-4 ${toolEnabled ? 'text-gray-600 hover:text-green-600' : 'text-gray-400'}`} />
                                 )}
                               </Button>
-                              <Button variant="ghost" size="icon" onClick={() => copyToClipboard(fullText, index)}>
-                                {copiedStates[index] ? <Check className="h-4 w-4 text-green-600" /> : <Copy className="h-4 w-4" />}
+                              <Button 
+                                variant="ghost" 
+                                size="icon" 
+                                onClick={() => copyToClipboard(fullText, index)}
+                                disabled={!toolEnabled} // NEW: Disable if tool is disabled
+                              >
+                                {copiedStates[index] ? <Check className="h-4 w-4 text-green-600" /> : <Copy className={`h-4 w-4 ${toolEnabled ? '' : 'text-gray-400'}`} />}
                               </Button>
                             </div>
                           </div>
@@ -801,6 +955,7 @@ export default function Home() {
                               size="sm"
                               onClick={() => copyToClipboard(fullText, index)}
                               className="flex-1"
+                              disabled={!toolEnabled} // NEW: Disable if tool is disabled
                             >
                               {copiedStates[index] ? (
                                 <>
@@ -818,6 +973,7 @@ export default function Home() {
                               variant="outline"
                               size="sm"
                               onClick={() => shareCaption(index)}
+                              disabled={!toolEnabled} // NEW: Disable if tool is disabled
                             >
                               <Share2 className="h-4 w-4" />
                             </Button>

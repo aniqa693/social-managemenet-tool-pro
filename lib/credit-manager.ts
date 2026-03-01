@@ -275,4 +275,8 @@ export class CreditManager {
       .limit(limit)
       .offset(offset);
   }
+  /**
+ * Check if a tool is enabled for use
+ */
+
 } 

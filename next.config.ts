@@ -25,7 +25,9 @@ const nextConfig: NextConfig = {
   reactCompiler: true,
      images:{
     domains:['ik.imagekit.io','i.ytimg.com']
-  }
+  },
+    serverExternalPackages: ['proxy-agent', 'apify-client'],
+
  
 };
 

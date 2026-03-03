@@ -243,4 +243,29 @@ export const userToolPermissions = pgTable("user_tool_permissions", {
   // Ensure one record per user per tool
   uniqueIndex("user_tool_unique").on(table.userId, table.toolName)
 ]);
+// Add to your existing db/schema.ts file
 
+// Growth Tips Table
+export const growthTips = pgTable('growth_tips', {
+  id: serial('id').primaryKey(),
+  niche: text('niche').notNull(),
+  content: jsonb('content').notNull(),
+  // userEmail: text('user_email'),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  createdOn: text('created_on').notNull(),
+});
+// Social Keywords Table
+// Keyword Only Table - stores only keywords, no extra data
+export const keywordOnlyData = pgTable('keyword_only_data', {
+  id: serial('id').primaryKey(),
+  userInput: text('user_input').notNull(),
+  keywords: text('keywords').array().notNull(), // Array of keywords
+  platformKeywords: jsonb('platform_keywords').notNull(), // Keywords by platform
+  userEmail: text('user_email'),
+    userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  createdOn: text('created_on').notNull(),
+});

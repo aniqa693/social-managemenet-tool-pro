@@ -39,8 +39,7 @@ const adminNavItems = [
     subItems: [
       { title: "All Users", href: "/dashboard/admin/users" },
       { title: "Create User", href: "/dashboard/admin/users/create" },
-      { title: "Role Management", href: "/dashboard/admin/users/roles" },
-      { title: "Suspended Users", href: "/dashboard/admin/users/suspended" },
+      
     ],
   },
   {
@@ -49,14 +48,16 @@ const adminNavItems = [
     icon: BarChart3,
     subItems: [
       { title: "Platform Performance", href: "/dashboard/admin/analytics/platform" },
-      { title: "Content Activity", href: "/dashboard/admin/analytics/content" },
-      { title: "Revenue Analytics", href: "/dashboard/admin/analytics/revenue" },
+      { title: "Content Activity", href: "/dashboard/admin/Trackcontent" },
     ],
   },
   {
     title: "AI Tools Management",
-    href: "/dashboard/admin/ai-tools",
+    href: "/dashboard/admin",
     icon: Activity,
+      subItems: [
+      { title: "Enable and Disenable tools", href: "/dashboard/admin/ai-tools" },
+    ],
   },
   {
     title: "Credit Management",
@@ -65,7 +66,6 @@ const adminNavItems = [
     subItems: [
       { title: "Credit Usage", href: "/dashboard/admin/credits/usage" },
       { title: "Update Credits", href: "/dashboard/admin/credits/update" },
-      { title: "Billing History", href: "/dashboard/admin/credits/billing" },
     ],
   },
   {
@@ -83,21 +83,8 @@ const adminNavItems = [
     href: "/dashboard/admin/notifications",
     icon: Bell,
   },
-  {
-    title: "Subscription Plans",
-    href: "/dashboard/admin/subscriptions",
-    icon: Package,
-    subItems: [
-      { title: "Plan Management", href: "/dashboard/admin/subscriptions/plans" },
-      { title: "Credit Limits", href: "/dashboard/admin/subscriptions/limits" },
-      { title: "Stripe Integration", href: "/dashboard/admin/subscriptions/stripe" },
-    ],
-  },
-  {
-    title: "System Settings",
-    href: "/dashboard/admin/settings",
-    icon: Settings,
-  },
+ 
+ 
 ];
 
 interface AdminSidebarProps {

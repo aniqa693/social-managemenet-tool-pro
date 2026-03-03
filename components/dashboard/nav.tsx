@@ -23,77 +23,77 @@ export function DashboardNav({ role }: NavProps) {
   const pathname = usePathname();
 
   // Only show links for the user's own role
-  const getNavItems = () => {
-    const baseItems = [
-      {
-        title: 'Dashboard',
-        href: `/dashboard/${role}`,
-        icon: LayoutDashboard,
-      },
-    ];
+  // const getNavItems = () => {
+  //   const baseItems = [
+  //     {
+  //       title: 'Dashboard',
+  //       href: `/dashboard/${role}`,
+  //       icon: LayoutDashboard,
+  //     },
+  //   ];
 
-    const roleItems = {
-      creator: [
-        {
-          title: 'Content Calendar',
-          href: `/dashboard/creator/calendar`,
-          icon: Calendar,
-        },
-        {
-          title: 'Posts',
-          href: `/dashboard/creator/posts`,
-          icon: PenTool,
-        },
-        {
-          title: 'Analytics',
-          href: `/dashboard/creator/analytics`,
-          icon: BarChart,
-        },
-      ],
-      analyst: [
-        {
-          title: 'Reports',
-          href: `/dashboard/analyst/reports`,
-          icon: PieChart,
-        },
-        {
-          title: 'Analytics',
-          href: `/dashboard/analyst/analytics`,
-          icon: BarChart,
-        },
-        {
-          title: 'Insights',
-          href: `/dashboard/analyst/insights`,
-          icon: Users,
-        },
-      ],
-      admin: [
-        {
-          title: 'Team',
-          href: `/dashboard/admin/team`,
-          icon: Users,
-        },
-        {
-          title: 'Settings',
-          href: `/dashboard/admin/settings`,
-          icon: Settings,
-        },
-        {
-          title: 'Security',
-          href: `/dashboard/admin/security`,
-          icon: Shield,
-        },
-      ],
-    };
+  //   const roleItems = {
+  //     creator: [
+  //       {
+  //         title: 'Content Calendar',
+  //         href: `/dashboard/creator/calendar`,
+  //         icon: Calendar,
+  //       },
+  //       {
+  //         title: 'Posts',
+  //         href: `/dashboard/creator/posts`,
+  //         icon: PenTool,
+  //       },
+  //       {
+  //         title: 'Analytics',
+  //         href: `/dashboard/creator/analytics`,
+  //         icon: BarChart,
+  //       },
+  //     ],
+  //     analyst: [
+  //       {
+  //         title: 'Reports',
+  //         href: `/dashboard/analyst/reports`,
+  //         icon: PieChart,
+  //       },
+  //       {
+  //         title: 'Analytics',
+  //         href: `/dashboard/analyst/analytics`,
+  //         icon: BarChart,
+  //       },
+  //       {
+  //         title: 'Insights',
+  //         href: `/dashboard/analyst/insights`,
+  //         icon: Users,
+  //       },
+  //     ],
+  //     admin: [
+  //       {
+  //         title: 'Team',
+  //         href: `/dashboard/admin/team`,
+  //         icon: Users,
+  //       },
+  //       {
+  //         title: 'Settings',
+  //         href: `/dashboard/admin/settings`,
+  //         icon: Settings,
+  //       },
+  //       {
+  //         title: 'Security',
+  //         href: `/dashboard/admin/security`,
+  //         icon: Shield,
+  //       },
+  //     ],
+  //   };
 
-    return [...baseItems, ...roleItems[role]];
-  };
+  //   return [...baseItems, ...roleItems[role]];
+  // };
 
-  const navItems = getNavItems();
+ // const navItems = getNavItems();
 
   return (
     <nav className="flex space-x-4 lg:space-x-6">
-      {navItems.map((item) => {
+      {/* {navItems.map((item) => {
         const Icon = item.icon;
         return (
           <Link
@@ -110,7 +110,7 @@ export function DashboardNav({ role }: NavProps) {
             {item.title}
           </Link>
         );
-      })}
+      })} */}
     </nav>
   );
 }

@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useState, useEffect } from 'react';
 import { toast } from 'react-hot-toast';
 
@@ -87,34 +88,7 @@ export default function AdminUsersPage() {
   };
 
   // CREATE USER
-  const handleCreateUser = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSubmitting(true);
-    
-    try {
-      const response = await fetch('/api/admin/users', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData),
-      });
-
-      const data = await response.json();
-
-      if (response.ok) {
-        toast.success('User created successfully');
-        setShowAddModal(false);
-        resetForm();
-        fetchUsers();
-      } else {
-        toast.error(data.error || 'Failed to create user');
-      }
-    } catch (error) {
-      toast.error('Error creating user');
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
+  
   // UPDATE USER
   const handleUpdateUser = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -291,7 +265,7 @@ export default function AdminUsersPage() {
             <h1 className="text-3xl font-bold text-gray-900">User Management</h1>
             <p className="text-gray-600 mt-2">Manage creator and analyst users</p>
           </div>
-          <button
+          {/* <button
             onClick={() => {
               resetForm();
               setShowAddModal(true);
@@ -299,7 +273,13 @@ export default function AdminUsersPage() {
             className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 whitespace-nowrap"
           >
             + Add New User
-          </button>
+          </button> */}
+          <Link
+  href="/dashboard/admin/users/create"
+  className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 whitespace-nowrap inline-flex items-center"
+>
+  + Add New User
+</Link>
         </div>
 
         {/* Filters */}
@@ -465,65 +445,7 @@ export default function AdminUsersPage() {
         </div>
 
         {/* ADD USER MODAL */}
-        {showAddModal && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-lg p-6 w-full max-w-md">
-              <h2 className="text-xl font-bold mb-4">Add New User</h2>
-              <form onSubmit={handleCreateUser}>
-                <div className="space-y-4">
-                  <input
-                    type="text"
-                    placeholder="Name"
-                    required
-                    className="w-full px-3 py-2 border rounded"
-                    value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  />
-                  <input
-                    type="email"
-                    placeholder="Email"
-                    required
-                    className="w-full px-3 py-2 border rounded"
-                    value={formData.email}
-                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                  />
-                  <select
-                    className="w-full px-3 py-2 border rounded"
-                    value={formData.role}
-                    onChange={(e) => setFormData({ ...formData, role: e.target.value as 'creator' | 'analyst' })}
-                  >
-                    <option value="creator">Creator</option>
-                    <option value="analyst">Analyst</option>
-                  </select>
-                  <input
-                    type="number"
-                    placeholder="Credits"
-                    min="0"
-                    className="w-full px-3 py-2 border rounded"
-                    value={formData.credits}
-                    onChange={(e) => setFormData({ ...formData, credits: parseInt(e.target.value) || 0 })}
-                  />
-                </div>
-                <div className="mt-6 flex justify-end gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setShowAddModal(false)}
-                    className="px-4 py-2 border rounded hover:bg-gray-50"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={submitting}
-                    className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 disabled:opacity-50"
-                  >
-                    {submitting ? 'Creating...' : 'Create'}
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        )}
+       
 
         {/* EDIT USER MODAL */}
         {showEditModal && selectedUser && (

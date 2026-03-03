@@ -113,11 +113,11 @@ export function SignUpDialog({ open, onOpenChange }: SignUpDialogProps) {
           {error && (
             <p className="text-sm text-red-500">{error}</p>
           )}
-          <Button type="submit" className="w-full" disabled={loading}>
+          <Button type="submit" className="bg-blue-500 hover:bg-blue-700  w-full" disabled={loading}>
             {loading ? 'Creating account...' : 'Sign Up'}
           </Button>
         </form>
       </DialogContent>
     </Dialog>
   );
-} 
+}  

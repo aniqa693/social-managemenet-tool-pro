@@ -8,10 +8,61 @@ import { userToolPermissions, toolPricingTable } from '../../../../db/schema';
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
-// NEW: Helper function to check if tool is enabled for user
+// Types
+type Platform = 'instagram' | 'facebook' | 'youtube' | 'tiktok' | 'linkedin' | 'twitter' | 'pinterest';
+type ContentType = 'educational' | 'entertainment' | 'promotional' | 'inspirational' | 'behind_scenes' | 'user_generated';
+type PostFormat = 'carousel' | 'video' | 'image' | 'story' | 'reel' | 'live' | 'text';
+
+interface PostIdea {
+  title: string;
+  description: string;
+  platform: Platform;
+  contentType: ContentType;
+  format: PostFormat;
+  hook: string;
+  keyPoints: string[];
+  hashtags: string[];
+  estimatedEngagement: 'high' | 'medium' | 'low';
+  bestTimeToPost?: string;
+  targetAudience: string;
+}
+
+interface ScriptSection {
+  title: string;
+  content: string;
+  visualCues: string[];
+  duration: string;
+  audioNotes: string;
+}
+
+interface ScriptType {
+  title: string;
+  hook: string;
+  sections: ScriptSection[];
+  conclusion: string;
+  cta: string;
+  totalDuration: string;
+  targetAudience: string;
+  hashtags: string[];
+  thumbnailIdeas: string[];
+}
+
+interface CombinedOutput {
+  script: ScriptType;
+  postIdeas: PostIdea[];
+  contentCalendar: {
+    day: string;
+    platform: string;
+    postType: string;
+    idea: string;
+    bestTime: string;
+  }[];
+  engagementTips: string[];
+}
+
+// Helper function to check if tool is enabled for user
 async function isToolEnabledForUser(userId: string, toolName: string): Promise<boolean> {
   try {
-    // First check if there's a custom permission for this user
     const userPermission = await db.query.userToolPermissions.findFirst({
       where: and(
         eq(userToolPermissions.userId, userId),
@@ -19,27 +70,24 @@ async function isToolEnabledForUser(userId: string, toolName: string): Promise<b
       )
     });
 
-    // If custom permission exists, use that
     if (userPermission) {
       return userPermission.isEnabled;
     }
 
-    // Otherwise check global tool setting
     const toolSetting = await db.query.toolPricingTable.findFirst({
       where: eq(toolPricingTable.tool_name, toolName)
     });
 
-    // Default to true if no setting found (for backward compatibility)
     return toolSetting?.enable_disenable ?? true;
     
   } catch (error) {
     console.error('Error checking tool enabled status:', error);
-    return true; // Default to enabled on error
+    return true;
   }
 }
 
-// Helper function to save script to database
-async function saveScriptToDatabase(
+// Helper function to save combined output to database
+async function saveToDatabase(
   userInput: string,
   content: any,
   videoType: string,
@@ -49,7 +97,7 @@ async function saveScriptToDatabase(
   userId?: string
 ) {
   try {
-    console.log('💾 Saving video script to database for user:', userEmail);
+    console.log('💾 Saving combined output to database for user:', userEmail);
     
     const result = await db.insert(videoScripts).values({
       userInput,
@@ -62,7 +110,7 @@ async function saveScriptToDatabase(
       createdOn: new Date().toISOString(),
     }).returning();
 
-    console.log('✅ Script saved successfully:', result[0]);
+    console.log('✅ Saved successfully:', result[0]);
     return result[0];
   } catch (error) {
     console.error('❌ Database save error:', error);
@@ -84,13 +132,15 @@ export async function POST(request: NextRequest) {
       userId
     } = await request.json();
 
-    console.log('🎬 Script generation for:', {
+    console.log('🎬 Combined generation for:', {
       userEmail,
       userId,
-      hasUser: !!userEmail && !!userId
+      topic,
+      videoType,
+      duration
     });
 
-    // NEW: Check if tool is enabled for this user (skip for guests)
+    // Check if tool is enabled for this user
     if (userId) {
       const toolEnabled = await isToolEnabledForUser(userId, 'script_generator');
       
@@ -122,18 +172,13 @@ export async function POST(request: NextRequest) {
     }
 
     // CREDIT CHECK - Required for authenticated users
-    let requiredCredits = 3; // Default cost for script generator
+    let requiredCredits = 5; // Increased cost for combined output
     
     console.log('💰 Checking credits for user:', userId);
     
     try {
-      // Get tool cost
       requiredCredits = await CreditManager.getToolCost('script_generator');
-      
-      // Check if user has sufficient credits
       const creditCheck = await CreditManager.hasSufficientCredits(userId, 'script_generator');
-      
-      console.log('💰 Credit check result:', creditCheck);
 
       if (!creditCheck.hasCredits) {
         return NextResponse.json(
@@ -141,7 +186,7 @@ export async function POST(request: NextRequest) {
             error: 'Insufficient credits',
             requiredCredits: creditCheck.requiredCredits,
             currentCredits: creditCheck.currentCredits,
-            message: `You need ${creditCheck.requiredCredits} credits to generate a script. You have ${creditCheck.currentCredits} credits.`
+            message: `You need ${creditCheck.requiredCredits} credits to generate content. You have ${creditCheck.currentCredits} credits.`
           },
           { status: 403 }
         );
@@ -154,132 +199,256 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    console.log('🚀 Generating video script for:', {
+    console.log('🚀 Generating combined content for:', {
       topic,
       tone,
       videoType,
       duration,
       includeHook,
       includeCTA,
-      creativityLevel,
-      userEmail
+      creativityLevel
     });
 
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+    // Try different model names
+    let model;
+    const modelNames = ['gemini-2.5-flash'];
+    
+    for (const modelName of modelNames) {
+      try {
+        console.log(`Attempting to use model: ${modelName}`);
+        model = genAI.getGenerativeModel({ model: modelName });
+        await model.generateContent('test');
+        console.log(`✅ Successfully connected to model: ${modelName}`);
+        break;
+      } catch (error: any) {
+        console.log(`❌ Failed with model ${modelName}:`, error?.message);
+        continue;
+      }
+    }
+    
+    if (!model) {
+      throw new Error('Failed to connect to any Gemini model');
+    }
 
+    // Enhanced prompt for combined script and post ideas
     const prompt = `
-      Generate a professional video script for the topic: "${topic}"
+      Generate a comprehensive content package for the topic: "${topic}"
       
-      Video Type: ${videoType || 'YouTube video'}
-      Tone: ${tone || 'engaging'}
-      Duration: ${duration || 5} minutes
-      ${includeHook ? 'Include a strong hook/opener' : ''}
-      ${includeCTA ? 'Include a call-to-action at the end' : ''}
-      Creativity level: ${creativityLevel || 7}/10
+      MAIN VIDEO SCRIPT REQUIREMENTS:
+      - Video Type: ${videoType || 'YouTube video'}
+      - Tone: ${tone || 'engaging'}
+      - Duration: ${duration || 5} minutes
+      ${includeHook ? '- Include a strong hook/opener' : ''}
+      ${includeCTA ? '- Include a call-to-action' : ''}
+      - Creativity level: ${creativityLevel || 7}/10
       
-      Generate a complete script with:
-      1. VIDEO TITLE (1 catchy title)
-      2. HOOK/INTRO (15-30 seconds to grab attention)
-      3. MAIN CONTENT (structured into 3-5 key points)
-      4. VISUAL CUES (what to show on screen for each section)
-      5. AUDIO NOTES (music, sound effects suggestions)
-      6. ${includeCTA ? 'CALL-TO-ACTION (clear next steps for viewers)' : 'CONCLUSION (wrap up the video)'}
+      ADDITIONAL CONTENT REQUIREMENTS:
+      - Generate 5 post ideas for social media platforms
+      - Create a 7-day content calendar
+      - Provide engagement tips for each platform
       
-      Make the script ${tone} and optimized for ${videoType}.
-      Format it as a professional script that's easy to follow.
-      
-      Return ONLY a JSON object with this exact structure:
+      Return a JSON object with this exact structure:
       {
-        "title": "Catchy Video Title Here",
-        "hook": "Attention-grabbing opening lines...",
-        "sections": [
+        "script": {
+          "title": "Catchy Video Title",
+          "hook": "Attention-grabbing opening lines...",
+          "sections": [
+            {
+              "title": "Section Title",
+              "content": "Script content...",
+              "visualCues": ["Visual element 1", "Visual element 2"],
+              "duration": "X minutes",
+              "audioNotes": "Music or sound suggestions"
+            }
+          ],
+          "conclusion": "Wrapping up...",
+          "cta": "Call-to-action...",
+          "totalDuration": "${duration || 5} minutes",
+          "targetAudience": "Primary audience",
+          "hashtags": ["#hashtag1", "#hashtag2"],
+          "thumbnailIdeas": ["Thumbnail idea 1", "Thumbnail idea 2"]
+        },
+        "postIdeas": [
           {
-            "title": "Section 1 Title",
-            "content": "Script content for this section...",
-            "visualCues": ["Show this on screen", "Visual element to display"],
-            "duration": "Estimated time for this section",
-            "audioNotes": "Music or sound suggestions"
+            "title": "Post Title",
+            "description": "Post description",
+            "platform": "instagram",
+            "contentType": "educational",
+            "format": "carousel",
+            "hook": "Attention grabber",
+            "keyPoints": ["Point 1", "Point 2", "Point 3"],
+            "hashtags": ["#tag1", "#tag2"],
+            "estimatedEngagement": "high",
+            "bestTimeToPost": "6-8 PM",
+            "targetAudience": "Audience description"
           }
         ],
-        "conclusion": "Wrapping up the video...",
-        "cta": "${includeCTA ? 'Clear call-to-action here...' : ''}",
-        "totalDuration": "${duration || 5} minutes",
-        "targetAudience": "Primary audience for this video",
-        "hashtags": ["#relevant", "#hashtags"],
-        "thumbnailIdeas": ["Visual idea 1", "Visual idea 2"]
+        "contentCalendar": [
+          {
+            "day": "Monday",
+            "platform": "instagram",
+            "postType": "educational",
+            "idea": "Brief idea description",
+            "bestTime": "6:00 PM"
+          }
+        ],
+        "engagementTips": [
+          "Tip 1: How to engage audience",
+          "Tip 2: Platform-specific strategy"
+        ]
       }
       
-      Be creative, engaging, and production-ready!
+      Make everything cohesive and aligned with the main topic: "${topic}".
+      Ensure the post ideas complement the video content and can be used for promotion.
     `;
 
     console.log('🤖 Sending prompt to Gemini AI...');
+    
     const result = await model.generateContent(prompt);
     const response = await result.response;
     const text = response.text();
 
     // Clean and parse JSON response
     const cleanText = text.replace(/```json|```/g, '').trim();
-    let generatedScript;
+    let generatedContent: CombinedOutput;
     
     try {
-      generatedScript = JSON.parse(cleanText);
-      console.log('✅ Successfully parsed script');
+      generatedContent = JSON.parse(cleanText);
+      console.log('✅ Successfully parsed combined content');
     } catch (parseError) {
       console.error('❌ JSON parsing error:', parseError);
-      const jsonMatch = cleanText.match(/\{.*\}/);
-      if (jsonMatch) {
-        try {
-          generatedScript = JSON.parse(jsonMatch[0]);
-          console.log('✅ Extracted JSON from text');
-        } catch (e) {
-          console.error('❌ Failed to extract JSON');
-          generatedScript = {
-            title: `How to Master ${topic}`,
-            hook: `Welcome to this video about ${topic}! Today, we're going to explore everything you need to know.`,
-            sections: [
-              {
-                title: "Introduction",
-                content: `Let's start by understanding what ${topic} is all about.`,
-                visualCues: ["Title screen", "Key points on screen"],
-                duration: "1 minute",
-                audioNotes: "Upbeat background music"
-              }
-            ],
-            conclusion: "That's it for today's video!",
-            cta: "Like and subscribe for more content!",
-            totalDuration: `${duration || 5} minutes`,
-            targetAudience: "Beginners and enthusiasts",
-            hashtags: [`#${topic.replace(/\s+/g, '')}`, "#video", "#tutorial"],
-            thumbnailIdeas: ["Eye-catching title", "Person presenting"]
-          };
-        }
-      } else {
-        console.log('⚠️ No JSON found, using fallback');
-        generatedScript = {
-          title: `The Complete Guide to ${topic}`,
-          hook: `Ready to dive into ${topic}? This video has everything you need!`,
+      
+      // Fallback content
+      generatedContent = {
+        script: {
+          title: `The Ultimate Guide to ${topic}`,
+          hook: `Welcome to this comprehensive guide about ${topic}! Today, we'll cover everything you need to know.`,
           sections: [
             {
-              title: "Getting Started",
-              content: `First, let's cover the basics of ${topic}.`,
-              visualCues: ["Intro animation", "Bullet points"],
+              title: "Introduction",
+              content: `Let's start with the basics of ${topic}.`,
+              visualCues: ["Title card", "Key points animation"],
               duration: "2 minutes",
-              audioNotes: "Energetic intro music"
+              audioNotes: "Upbeat background music"
+            },
+            {
+              title: "Main Content",
+              content: `Now let's dive deep into ${topic}.`,
+              visualCues: ["Demonstration footage", "Charts and graphs"],
+              duration: "3 minutes",
+              audioNotes: "Informative background music"
             }
           ],
-          conclusion: "Thanks for watching!",
-          cta: "Leave a comment with your questions!",
+          conclusion: "That wraps up our guide to " + topic + "!",
+          cta: "Subscribe for more content like this!",
           totalDuration: `${duration || 5} minutes`,
-          targetAudience: "Content creators",
-          hashtags: [`#${topic}`, "#howto", "#guide"],
-          thumbnailIdeas: ["Bold text", "Colorful background"]
-        };
-      }
+          targetAudience: "Anyone interested in " + topic,
+          hashtags: [`#${topic.replace(/\s+/g, '')}`, "#tutorial", "#guide"],
+          thumbnailIdeas: ["Bold title text", "Eye-catching image"]
+        },
+        postIdeas: [
+          {
+            title: `5 Things You Didn't Know About ${topic}`,
+            description: `Discover surprising facts about ${topic} that will blow your mind!`,
+            platform: "instagram",
+            contentType: "educational",
+            format: "carousel",
+            hook: `Think you know everything about ${topic}? Think again!`,
+            keyPoints: [
+              `The origin of ${topic}`,
+              `Latest trends in ${topic}`,
+              `Future predictions`
+            ],
+            hashtags: [`#${topic}`, "#facts", "#education"],
+            estimatedEngagement: "high",
+            bestTimeToPost: "7:00 PM",
+            targetAudience: "Curious minds"
+          },
+          {
+            title: `Behind the Scenes: Creating Our ${topic} Video`,
+            description: `See how we put together our latest video about ${topic}!`,
+            platform: "tiktok",
+            contentType: "behind_scenes",
+            format: "video",
+            hook: `Want to see how we make our videos?`,
+            keyPoints: [
+              "Filming process",
+              "Editing workflow",
+              "Final touches"
+            ],
+            hashtags: ["#behindthescenes", "#creatorlife", "#bts"],
+            estimatedEngagement: "medium",
+            bestTimeToPost: "12:00 PM",
+            targetAudience: "Content creators"
+          },
+          {
+            title: `${topic} Q&A - Answering Your Questions`,
+            description: `We're answering the most common questions about ${topic}!`,
+            platform: "youtube",
+            contentType: "entertainment",
+            format: "video",
+            hook: `You asked, we answered!`,
+            keyPoints: [
+              "Question 1 answered",
+              "Question 2 answered", 
+              "Question 3 answered"
+            ],
+            hashtags: ["#QandA", "#community", "#questions"],
+            estimatedEngagement: "high",
+            bestTimeToPost: "8:00 PM",
+            targetAudience: "Subscribers and fans"
+          }
+        ],
+        contentCalendar: [
+          {
+            day: "Monday",
+            platform: "instagram",
+            postType: "teaser",
+            idea: `Teaser for the main ${topic} video`,
+            bestTime: "6:00 PM"
+          },
+          {
+            day: "Wednesday",
+            platform: "youtube",
+            postType: "video",
+            idea: `Main ${topic} video goes live`,
+            bestTime: "3:00 PM"
+          },
+          {
+            day: "Friday",
+            platform: "tiktok",
+            postType: "behind_scenes",
+            idea: `Behind the scenes of ${topic} video creation`,
+            bestTime: "7:00 PM"
+          },
+          {
+            day: "Saturday",
+            platform: "twitter",
+            postType: "discussion",
+            idea: `Discussion thread about ${topic}`,
+            bestTime: "11:00 AM"
+          },
+          {
+            day: "Sunday",
+            platform: "linkedin",
+            postType: "professional",
+            idea: `Professional insights on ${topic}`,
+            bestTime: "10:00 AM"
+          }
+        ],
+        engagementTips: [
+          `Reply to all comments on your ${topic} video within the first hour`,
+          `Create polls related to ${topic} to boost engagement`,
+          `Share user-generated content about ${topic}`,
+          `Cross-promote your video across all platforms`,
+          `Use trending hashtags related to ${topic}`
+        ]
+      };
     }
 
     // Prepare data for database
     const contentForDB = {
-      script: generatedScript,
+      combined: generatedContent,
       settings: {
         topic,
         tone,
@@ -291,9 +460,10 @@ export async function POST(request: NextRequest) {
         generatedAt: new Date().toISOString()
       },
       metadata: {
-        sections: generatedScript.sections?.length || 1,
-        hasCTA: includeCTA,
-        hasHook: includeHook
+        scriptSections: generatedContent.script.sections?.length || 1,
+        postIdeas: generatedContent.postIdeas?.length || 0,
+        calendarDays: generatedContent.contentCalendar?.length || 0,
+        tips: generatedContent.engagementTips?.length || 0
       }
     };
 
@@ -306,8 +476,8 @@ export async function POST(request: NextRequest) {
       creditDeductionResult = await CreditManager.useTool(
         userId,
         'script_generator',
-        `Generated ${generatedScript.sections?.length || 1}-section script for topic: ${topic}`,
-        { topic, videoType, duration }
+        `Generated complete content package for: ${topic} (Script + ${generatedContent.postIdeas?.length || 0} Post Ideas)`,
+        { topic, videoType, duration, postIdeasCount: generatedContent.postIdeas?.length }
       );
 
       console.log('💰 Credit deduction result:', creditDeductionResult);
@@ -323,7 +493,7 @@ export async function POST(request: NextRequest) {
     let savedRecord = null;
     
     try {
-      savedRecord = await saveScriptToDatabase(
+      savedRecord = await saveToDatabase(
         topic,
         contentForDB,
         videoType || 'youtube',
@@ -332,7 +502,7 @@ export async function POST(request: NextRequest) {
         userEmail,
         userId
       );
-      console.log('💾 Script saved to database with ID:', savedRecord?.id);
+      console.log('💾 Content saved to database with ID:', savedRecord?.id);
     } catch (dbError) {
       console.error('⚠️ Failed to save to database, but continuing with response:', dbError);
     }
@@ -340,7 +510,10 @@ export async function POST(request: NextRequest) {
     // Return response with credit info
     return NextResponse.json({
       success: true,
-      script: generatedScript,
+      script: generatedContent.script,
+      postIdeas: generatedContent.postIdeas,
+      contentCalendar: generatedContent.contentCalendar,
+      engagementTips: generatedContent.engagementTips,
       creditInfo: {
         deducted: true,
         amount: Math.abs(creditDeductionResult?.amount || requiredCredits),
@@ -351,22 +524,23 @@ export async function POST(request: NextRequest) {
         saved: !!savedRecord,
         recordId: savedRecord?.id,
         userEmail: userEmail,
-        message: savedRecord ? 'Script saved to database' : 'Failed to save script'
+        message: savedRecord ? 'Content saved to database' : 'Failed to save content'
       },
       metadata: {
         duration: duration || 5,
         videoType: videoType || 'youtube',
         tone: tone || 'engaging',
+        postIdeasCount: generatedContent.postIdeas?.length || 0,
         generatedAt: new Date().toISOString(),
         userId: userId
       }
     });
     
   } catch (error) {
-    console.error('💥 Error generating script:', error);
+    console.error('💥 Error generating content:', error);
     return NextResponse.json(
       { 
-        error: 'Failed to generate video script. Please try again.',
+        error: 'Failed to generate content. Please try again.',
         details: error instanceof Error ? error.message : 'Unknown error'
       },
       { status: 500 }

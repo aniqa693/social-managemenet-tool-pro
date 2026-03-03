@@ -61,7 +61,6 @@ const creatorNavItems = [
     icon: Sparkles,
     subItems: [
       { title: "Generate Captions", href: "/dashboard/creator/captions" },
-      { title: "Generate Hashtags", href: "/dashboard/creator/hashtags" },
       { title: "Video Titles", href: "/dashboard/creator/titles" },
       { title: "Video Scripts", href: "/dashboard/creator/scripts" },
       { title: "Keyword Generation", href: "/dashboard/creator/keywords" },
@@ -92,7 +91,6 @@ const creatorNavItems = [
     href: "/dashboard/creator/credits",
     icon: CreditCard,
     subItems: [
-      { title: "Available Credits", href: "/dashboard/creator/credits/balance" },
       { title: "Purchase Credits", href: "/dashboard/creator/credits/purchase" },
       { title: "Usage History", href: "/dashboard/creator/credits/history" },
     ],

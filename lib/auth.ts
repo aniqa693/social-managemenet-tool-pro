@@ -8,6 +8,8 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { user } from "../auth-schema";
 import { eq } from "drizzle-orm";
 import { customSession } from "better-auth/plugins";
+//import { sendEmail } from './email'; // your email sending function
+
 export type UserRole = 'creator' | 'analyst' | 'admin';
 
 // const stripeClient = new Stripe(process.env.STRIPE_SECRET_KEY!, {
@@ -22,11 +24,16 @@ export const auth = betterAuth({
 
   emailAndPassword: {
     enabled: true,
-    async sendResetPassword(url, user) {
-      // Implement email sending logic here
-      console.log(`Reset password URL: ${url}`);
-    },
+       // requireEmailVerification: true
+
+    // async sendResetPassword(url, user) {
+    //   // Implement email sending logic here
+    //   console.log(`Reset password URL: ${url}`);
+    // },
   },
+    // emailVerification: {
+    //     sendOnSignUp: true
+    // },
   user: {
     additionalFields: {
       role: {
@@ -71,8 +78,8 @@ export const auth = betterAuth({
         }
       }
     }
-  }
-
+  },
+ 
 });
 
 

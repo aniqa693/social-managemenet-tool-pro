@@ -91,7 +91,9 @@ const creatorNavItems = [
     href: "/dashboard/creator/credits",
     icon: CreditCard,
     subItems: [
-      { title: "Purchase Credits", href: "/dashboard/creator/credits/purchase" },
+      { title: "Purchase Credits", href: "/dashboard/creator/billing" },
+            { title: "billing Information", href: "/dashboard/creator/billing-info" },
+
       { title: "Usage History", href: "/dashboard/creator/credits/history" },
     ],
   },

@@ -15,6 +15,8 @@ export const user = pgTable("user", {
     .notNull(),
       credits: integer("credits").default(0),
   role: text("role", { enum: ['admin', 'creator', 'analyst'] }).default("creator").notNull(),
+      	stripeCustomerId: text("stripe_customer_id"),
+
 // enble_disenable:boolean("true")
  // role: text("role").default("creator"),
   // toolname:text("tname").default("no")
@@ -268,4 +270,48 @@ export const keywordOnlyData = pgTable('keyword_only_data', {
     .notNull()
     .references(() => user.id, { onDelete: "cascade" }),
   createdOn: text('created_on').notNull(),
+});
+export const subscription = pgTable("subscription", {
+  id: text("id").primaryKey(),
+  
+  // The field name must be exactly "referenceId" - this maps to your user ID
+  referenceId: text("reference_id")
+    .references(() => user.id, { onDelete: "cascade" })
+    .notNull(),
+  
+  // Plan information
+  plan: text("plan").notNull(), // The name of the plan
+  
+  // Stripe IDs
+  stripeCustomerId: text("stripe_customer_id"),
+  stripeSubscriptionId: text("stripe_subscription_id"),
+  stripeScheduleId: text("stripe_schedule_id"),
+  
+  // Subscription status
+  status: text("status").notNull(), // active, canceled, past_due, trialing, etc.
+  
+  // Period dates
+  periodStart: timestamp("period_start"),
+  periodEnd: timestamp("period_end"),
+  
+  // Cancellation fields
+  cancelAtPeriodEnd: boolean("cancel_at_period_end").default(false),
+  cancelAt: timestamp("cancel_at"),
+  canceledAt: timestamp("canceled_at"),
+  endedAt: timestamp("ended_at"),
+  
+  // Trial fields
+  trialStart: timestamp("trial_start"),
+  trialEnd: timestamp("trial_end"),
+  
+  // Billing
+  billingInterval: text("billing_interval"), // 'month', 'year'
+  seats: integer("seats").default(1),
+  
+  // Timestamps
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at")
+    .defaultNow()
+    .$onUpdate(() => new Date())
+    .notNull(),
 });
